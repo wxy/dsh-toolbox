@@ -1017,3 +1017,119 @@ export async function applyUngroupedNewSessionPatch(dshInstall) {
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- ungrouped anchor v6: a persistent empty session, not a button ----------
+
+const ANCHOR6_MARKER = 'dsh-toolbox ungrouped-anchor'
+
+const A6_REMOVE_BUTTON_OLD = `									}),
+									group.key === "" && (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: clsx(Rows_module_css_default.sessionRow, WorkspaceBrowser_module_css_default.sessionOverflowButton),
+										title: t("actions.newSession.aria", { name: "" }),
+										onClick: () => {
+											createUngroupedSession();
+										},
+										onDragOver: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											e.dataTransfer.dropEffect = "move";
+											setSessionDropMarker({ id: group.key, half: "after" });
+										},
+										onDrop: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											if (drag !== null) commitSessionToUngroupedDrag(drag);
+										},
+										children: "＋ 新会话"
+									})
+								]`
+
+const A6_REMOVE_BUTTON_NEW = `									})
+								]`
+
+const A6_CREATE_OLD = `				createUngroupedSession: async () => {
+					const snapshot = ctx.workspaces.list.getSnapshot();
+					const items = snapshot?.items ?? [];
+					const current = ctx.sessions.list.getSnapshot().current;
+					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
+					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", { args: payload }, void 0);
+					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await ctx.sessions.open(result.value.sessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+const A6_CREATE_NEW = `				createUngroupedSession: async (options = {}) => {
+					const snapshot = ctx.workspaces.list.getSnapshot();
+					const items = snapshot?.items ?? [];
+					const current = ctx.sessions.list.getSnapshot().current;
+					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
+					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", { args: payload }, void 0);
+					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					if (options.open !== false) await ctx.sessions.open(result.value.sessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+const A6_EFFECT_OLD = `			const ungroupedSessionIds = (0, react.useMemo)(() => {
+				const accounted = new Set(workspaces.flatMap((workspace) => workspace.sessionIds));
+				return list.ids.filter((id) => list.byId[id] !== void 0 && !accounted.has(id));
+			}, [list, workspaces]);`
+
+const A6_EFFECT_NEW = `			const ungroupedSessionIds = (0, react.useMemo)(() => {
+				const accounted = new Set(workspaces.flatMap((workspace) => workspace.sessionIds));
+				return list.ids.filter((id) => list.byId[id] !== void 0 && !accounted.has(id));
+			}, [list, workspaces]);
+			// dsh-toolbox ungrouped-anchor: keep one EMPTY session under the
+			// ungrouped bucket so it is never a dead zone — an openable row the
+			// user can use anytime, and a real drop anchor for detaching
+			// workspace sessions into ungrouped (the row carries the blue-bar +
+			// detach path of a normal session row).
+			const ungroupedAnchorRef = (0, react.useRef)(false);
+			(0, react.useEffect)(() => {
+				if (list.phase !== "ready") return;
+				if (ungroupedSessionIds.length > 0) {
+					ungroupedAnchorRef.current = false;
+					return;
+				}
+				if (ungroupedAnchorRef.current) return;
+				ungroupedAnchorRef.current = true;
+				createUngroupedSession({ open: false }).catch((reason) => {
+					ungroupedAnchorRef.current = false;
+					console.warn("auto-create ungrouped session failed:", reason);
+				});
+			}, [ungroupedSessionIds.length, list.phase, createUngroupedSession]);`
+
+/**
+ * ungrouped anchor v6: replace the "+ 新会话" button with a persistent empty
+ * session. Whenever the ungrouped bucket has no sessions, one empty session is
+ * auto-created (without opening it): the user can open and use it anytime, and
+ * it is a real session row, so dragging a workspace session onto it detaches
+ * into ungrouped with the blue-bar feedback. Requires v5 (new-session-anchor).
+ */
+export async function applyUngroupedAnchorPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`ungrouped-anchor target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(ANCHOR6_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes('＋ 新会话') || !original.includes('createUngroupedSession: async')) {
+    throw new Error('ungrouped-anchor: new-session-anchor (v5) is not applied; run --new-session-anchor first')
+  }
+  const pairs = [
+    [A6_REMOVE_BUTTON_OLD, A6_REMOVE_BUTTON_NEW],
+    [A6_CREATE_OLD, A6_CREATE_NEW],
+    [A6_EFFECT_OLD, A6_EFFECT_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('ungrouped-anchor: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-ungrouped-anchor.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('const ungroupedAnchorRef = (0, react.useRef)(false);',
+    `// dsh-toolbox ungrouped-anchor\n\t\t\tconst ungroupedAnchorRef = (0, react.useRef)(false);`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}

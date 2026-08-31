@@ -45,7 +45,7 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch, applyUngroupedAnchorPatch } = await import('../src/patch.mjs')
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -89,6 +89,15 @@ async function main() {
       else console.log('已应用:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: 刷新浏览器即可——未分组桶下出现"＋ 新会话"锚点（点击创建未分组会话，也是拖拽落点）。')
+    return
+  }
+  if (flags['ungrouped-anchor'] === true) {
+    const results = await applyUngroupedAnchorPatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 需要先应用 new-session-anchor(v5)。刷新浏览器即可——未分组桶空时会自动常驻一个空会话（可点开使用，也是拖拽落点）。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)
