@@ -3,7 +3,8 @@
  * reader enforces: every frame is checksummed, and the FIRST frame of a
  * session log must contain exactly the header line.
  */
-import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { promisify } from 'node:util'
+import { constants, zstdCompress, zstdDecompressSync } from 'node:zlib'
 
 export const ZSTD_MAGIC = 4247762216 // 0xFD2FB528 LE
 
@@ -58,9 +59,9 @@ export function decompressFrame(buffer) {
   return zstdDecompressSync(buffer)
 }
 
-/** Compress one checksummed frame, matching the harness writer. */
-export function compressFrame(input) {
-  return zstdCompressSync(input, { params: { [0x04]: 1 } }) // ZSTD_c_checksumFlag = 4
+/** Compress one checksummed frame, matching the harness writer (async). */
+export async function compressFrame(input) {
+  return promisify(zstdCompress)(input, { params: { [constants.ZSTD_c_checksumFlag]: 1 } })
 }
 
 /** Concatenated plaintext of all complete frames (torn tail omitted). */

@@ -75,7 +75,7 @@ export async function planContentFix(dshInstall, plaintext) {
 }
 
 async function decodeRows(dshInstall, line) {
-  const { decodeStorageRecord } = await import('./harness.mjs')
+  const { decodeStorageRecord } = await import('../../core/src/harness.mjs')
   return decodeStorageRecord(dshInstall, JSON.parse(line))
 }
 
@@ -89,7 +89,7 @@ export async function repackage(lines, compression) {
   const header = `${lines[0]}\n`
   const body = lines.length > 1 ? `${lines.slice(1).join('\n')}\n` : ''
   if (compression !== 'zstd') return Buffer.from(header + body)
-  return Buffer.concat([compressFrame(header), compressFrame(body)])
+  return Buffer.concat([await compressFrame(header), await compressFrame(body)])
 }
 
 /** Publish atomically (temp write + rename). */
@@ -128,8 +128,16 @@ export async function repairRoot(dshInstall, root, options = {}) {
       detail = `no recoverable committed prefix: ${view.issue}`
     } else {
       const fix = await planContentFix(dshInstall, view.plaintext)
-      strategy = fix.strategy
-      detail = fix.detail
+      if (fix.strategy === 'none' && view.issue !== undefined && /first frame is not exactly one header line/.test(view.issue)) {
+        // Layout-only corruption: the content is contiguous but the physical
+        // frame layout violates the reader's contract (e.g. the whole log was
+        // recompressed as a single frame). Repackage into [header][events].
+        strategy = 'repackage-frames'
+        detail = `${view.issue}; event region is contiguous, repackaging frames`
+      } else {
+        strategy = fix.strategy
+        detail = fix.detail
+      }
       rebuilt = await repackage(fix.lines, compression)
     }
 

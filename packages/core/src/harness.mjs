@@ -26,13 +26,13 @@ const dshSessionUrl = (dshInstall) => pathToFileURL(
   join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-session', 'lib', 'index.js'),
 ).href
 
-const decoderCache = new WeakMap()
+const decoderCache = new Map()
 /** Lazily import decodeStorageRecord from the installed dsh-session package. */
 export async function decodeStorageRecord(dshInstall, line) {
-  let mod = decoderCache.get(dshInstall)
+  let mod = decoderCache.get(String(dshInstall))
   if (mod === undefined) {
     mod = await import(dshSessionUrl(dshInstall))
-    decoderCache.set(dshInstall, mod)
+    decoderCache.set(String(dshInstall), mod)
   }
   return mod.decodeStorageRecord(line)
 }
