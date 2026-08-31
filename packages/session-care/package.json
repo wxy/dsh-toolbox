@@ -4,11 +4,25 @@
   "description": "Plugin: session-log health check and repair for the DeepSeek Harness. Scans every stored session log under the reader's two contracts (frame layout + contiguous seqs), reports corruption precisely, and repairs recoverable logs (frame repackaging, duplicate-segment removal, safe truncation) with originals preserved.",
   "type": "module",
   "bin": {
-    "wxy-session-care": "./bin/session-care.mjs"
+    "wxy-session-care": "./bin/wxy-session-care.mjs"
   },
   "files": [
     "bin",
     "src"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@dsh-toolbox/core": "^0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wxy/dsh-toolbox.git",
+    "directory": "packages/session-care"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

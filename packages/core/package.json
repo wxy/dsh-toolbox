@@ -4,5 +4,19 @@
   "description": "Shared low-level pieces for the dsh-toolbox plugins: zstd frame codec matching the harness reader contract, and installed-harness discovery.",
   "type": "module",
   "license": "MIT",
-  "private": true
+  "private": false,
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wxy/dsh-toolbox.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

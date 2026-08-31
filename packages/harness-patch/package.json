@@ -1,14 +1,28 @@
 {
   "name": "@dsh-toolbox/harness-patch",
   "version": "0.1.0",
-  "description": "Plugin: local resilience patch for the installed DeepSeek Harness. Makes session listing tolerant to corrupt logs (one bad artifact no longer takes the whole session surface down). Idempotent, backed up, verified; re-run after harness upgrades.",
+  "description": "Plugin: apply the local session-area management patch to an installed DeepSeek Harness — drag-organization across workspaces/ungrouped/archived, archived folder, cross-directory moves, and resilience to corrupt logs. One command applies everything; idempotent, backed up, verified.",
   "type": "module",
   "bin": {
-    "wxy-harness-patch": "./bin/harness-patch.mjs"
+    "wxy-harness-patch": "./bin/wxy-harness-patch.mjs"
   },
   "files": [
     "bin",
     "src"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@dsh-toolbox/core": "^0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wxy/dsh-toolbox.git",
+    "directory": "packages/harness-patch"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

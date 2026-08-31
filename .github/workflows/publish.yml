@@ -1,0 +1,37 @@
+name: publish to npm
+
+# 触发：推送任意 v* 标签（例如 git tag v0.1.0 && git push --tags）
+# 前提：仓库 Settings → Secrets and variables → Actions 里配置 NPM_TOKEN
+#       （npmjs.com → Access Tokens 生成的 publish/automation 类型 token）
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+      # 发布顺序：core 先发（session-care / harness-patch 依赖它）
+      - name: Publish @dsh-toolbox/core
+        working-directory: packages/core
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish @dsh-toolbox/session-care
+        working-directory: packages/session-care
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish @dsh-toolbox/harness-patch
+        working-directory: packages/harness-patch
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
