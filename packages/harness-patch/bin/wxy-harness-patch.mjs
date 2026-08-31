@@ -40,6 +40,7 @@ async function main() {
   --workspace-live / --workspace-live-v2 / --ungrouped-detach / --blue-bar
   --new-session-anchor / --ungrouped-anchor / --blank-visible
   --detach-payload-fix / --move-error-clarity / --workspace-bundle
+  --move-live-safe
 
 说明:
   • 幂等：已打过则直接跳过；修改前备份原文件。
@@ -69,6 +70,7 @@ async function main() {
       ['move-persistence-fix(v13)', () => patch.applyMovePersistenceFix(dshInstall)],
       ['empty-drop-row(v14)', () => patch.applyEmptyDropRowPatch(dshInstall)],
       ['hover-placeholder(v15)', () => patch.applyHoverPlaceholderPatch(dshInstall)],
+      ['move-live-safe(v16)', () => patch.applyMoveLiveSafePatch(dshInstall)],
     ]
     for (const [label, fn] of steps) {
       try {
@@ -180,6 +182,15 @@ async function main() {
       }
     }
     console.log('注意: 归档文件夹/拖拽解除归档需刷新浏览器；unarchive/跨目录移动 RPC 需重启一次 Harness。')
+    return
+  }
+  if (flags['move-live-safe'] === true) {
+    const results = await patch.applyMoveLiveSafePatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup, '\n  校验:', result.verified)
+    }
+    console.log('注意: 需重启一次 Harness 生效。此后：跨目录移动会拒绝"正在打开"的会话（先切换到别的会话/重启再移动），并且移动失败会原子回滚，不再产生半搬状态。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)

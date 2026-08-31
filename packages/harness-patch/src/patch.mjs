@@ -2040,11 +2040,150 @@ export async function applyHoverPlaceholderPatch(dshInstall) {
   if (!existsSync(clientTarget)) throw new Error(`hover-placeholder target not found: ${clientTarget}`)
   const original = readFileSync(clientTarget, 'utf8')
   if (original.includes(HOVERPLACE_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (original.includes(W15_NEW)) {
+    // The code change is already in place — earlier applies never wrote the
+    // marker comment, so idempotence must be content-based.
+    return [{ file: clientTarget, alreadyPatched: true }]
+  }
   if (!original.includes(W15_OLD)) {
     throw new Error('hover-placeholder: the placeholder condition no longer matches; aborting without touching the bundle')
   }
   const backup = `${clientTarget}.pre-hover-placeholder.bak`
   if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(W15_OLD, W15_NEW))
+  writeFileSync(clientTarget, original.replace(W15_OLD, `// dsh-toolbox hover-placeholder\n${W15_NEW}`))
   return [{ file: clientTarget, backup, changed: true }]
+}
+
+// --- move-live-safe (v16): refuse live sessions + atomic rollback ------------
+
+const MOVELIVE_MARKER = 'dsh-toolbox move-live-safe'
+
+const M16_LIVE_OLD = `				const live = ctx.agents.get(sessionId);
+				if (live !== void 0 && live.status === "running") {
+					return err(request, {
+						code: "session-running",
+						message: \`session "\${sessionId}" is running; stop it before moving it to another workspace\`,
+						details: { sessionId }
+					});
+				}`
+
+const M16_LIVE_NEW = `				// dsh-toolbox move-live-safe
+				const live = ctx.agents.get(sessionId);
+				if (live !== void 0) {
+					return err(request, {
+						code: "session-live",
+						message: \`session "\${sessionId}" is currently open, so its log cannot be moved (a live session appends to its old path; moving it now would break the session). Switch to another session (or restart Harness), then move it again.\`,
+						details: { sessionId }
+					});
+				}`
+
+const M16_MUTATE_OLD = `				try {
+					for (const workspace of ctx.workspaceRegistry.list()) {
+						if (workspace.sessionIds.includes(sessionId)) await workspace.detachSession(sessionId);
+					}
+					const bytes = await readFile(foundPath);
+					const { frames } = scanFrames(bytes);
+					const first = zstdDecompressSync(bytes.subarray(frames[0].start, frames[0].end));
+					const rest = bytes.subarray(frames[0].end);
+					const newFirst = await compressFrame(Buffer.from(JSON.stringify({ ...header, cwd: target.path }) + "\\n"));
+					const newDir = join(root, projectKey(target.path), encodeSegment(sessionId));
+					await mkdir(newDir, { recursive: true, mode: 0o700 });
+					await writeFile(join(newDir, "session.jsonl.zstd"), Buffer.concat([newFirst, rest]));
+					await writeFile(join(newDir, "session.jsonl.zstd.pre-move-" + Date.now() + ".bak"), bytes);
+					const check = await readFile(join(newDir, "session.jsonl.zstd"));
+					const { frames: checkFrames } = scanFrames(check);
+					const checkFirst = zstdDecompressSync(check.subarray(checkFrames[0].start, checkFrames[0].end));
+					const checkHeader = JSON.parse(checkFirst.subarray(0, -1).toString("utf8"));
+					if (checkHeader.cwd !== target.path) throw new Error("verification failed after relocation");
+					await rm(dirname(foundPath), { recursive: true, force: true });
+					await target.attachSession(sessionId);
+				} catch (error) {
+					return err(request, { code: "workspace-move-failed", message: "cannot move session \\"" + sessionId + "\\": " + String(error), details: { sessionId } });
+				}`
+
+const M16_MUTATE_NEW = `				let newDirCreated = false;
+				let oldRemoved = false;
+				let attached = false;
+				let movedBytes;
+				let newDir;
+				try {
+					movedBytes = await readFile(foundPath);
+					const { frames } = scanFrames(movedBytes);
+					const first = zstdDecompressSync(movedBytes.subarray(frames[0].start, frames[0].end));
+					const rest = movedBytes.subarray(frames[0].end);
+					const newFirst = await compressFrame(Buffer.from(JSON.stringify({ ...header, cwd: target.path }) + "\\n"));
+					newDir = join(root, projectKey(target.path), encodeSegment(sessionId));
+					await mkdir(newDir, { recursive: true, mode: 0o700 });
+					newDirCreated = true;
+					await writeFile(join(newDir, "session.jsonl.zstd"), Buffer.concat([newFirst, rest]));
+					await writeFile(join(newDir, "session.jsonl.zstd.pre-move-" + Date.now() + ".bak"), movedBytes);
+					const check = await readFile(join(newDir, "session.jsonl.zstd"));
+					const { frames: checkFrames } = scanFrames(check);
+					const checkFirst = zstdDecompressSync(check.subarray(checkFrames[0].start, checkFrames[0].end));
+					const checkHeader = JSON.parse(checkFirst.subarray(0, -1).toString("utf8"));
+					if (checkHeader.cwd !== target.path) throw new Error("verification failed after relocation");
+					await rm(dirname(foundPath), { recursive: true, force: true });
+					oldRemoved = true;
+					await target.attachSession(sessionId);
+					attached = true;
+					for (const workspace of ctx.workspaceRegistry.list()) {
+						if (workspace.id !== target.id && workspace.sessionIds.includes(sessionId)) await workspace.detachSession(sessionId);
+					}
+				} catch (error) {
+					// A failed move must never orphan the session: drop the new
+					// copy and, when the old artifact was already removed,
+					// restore the original bytes. Workspace accounting is only
+					// touched AFTER the target attach wins, so a failure here
+					// leaves the durable accounting exactly as it was.
+					if (!attached) {
+						if (newDirCreated) {
+							try {
+								await rm(newDir, { recursive: true, force: true });
+							} catch {}
+						}
+						if (oldRemoved) {
+							try {
+								await mkdir(dirname(foundPath), { recursive: true, mode: 0o700 });
+								await writeFile(foundPath, movedBytes);
+							} catch (restoreError) {
+								return err(request, { code: "workspace-move-failed", message: "cannot move session \\"" + sessionId + "\\": " + String(error) + " (rollback also failed: " + String(restoreError) + ")", details: { sessionId } });
+							}
+						}
+					}
+					return err(request, { code: "workspace-move-failed", message: "cannot move session \\"" + sessionId + "\\": " + String(error), details: { sessionId } });
+				}`
+
+/**
+ * move-live-safe (v16, host): fix the half-applied cross-directory move.
+ *  - refuse ANY live session (not just running ones): attachSession validates
+ *    against the live in-memory header, whose cwd still points at the old
+ *    workspace, so moving an open session always failed AFTER the file was
+ *    already relocated — leaving the session orphaned and the open session
+ *    appending to a deleted path (ENOENT on the next message).
+ *  - make the relocation atomic with rollback: the old artifact is deleted
+ *    only after the target attach succeeds, workspace detach runs after
+ *    attach, and any failure restores the original file. Requires the
+ *    workspace-bundle host patch (v10) + move-persistence-fix (v13).
+ */
+export async function applyMoveLiveSafePatch(dshInstall) {
+  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
+  if (!existsSync(apiTarget)) throw new Error(`move-live-safe target not found: ${apiTarget}`)
+  const original = readFileSync(apiTarget, 'utf8')
+  if (original.includes(MOVELIVE_MARKER)) return [{ file: apiTarget, alreadyPatched: true }]
+  if (!original.includes(M16_LIVE_OLD) || !original.includes(M16_MUTATE_OLD)) {
+    throw new Error('move-live-safe: the moveSessionToWorkspace command no longer matches (workspace-bundle v10 host command + v13 fix must be applied first); aborting without touching the bundle')
+  }
+  const backup = `${apiTarget}.pre-move-live-safe.bak`
+  if (!existsSync(backup)) copyFileSync(apiTarget, backup)
+  let next = original
+  next = next.replace(M16_LIVE_OLD, M16_LIVE_NEW)
+  next = next.replace(M16_MUTATE_OLD, M16_MUTATE_NEW)
+  writeFileSync(apiTarget, next)
+  const { spawnSync } = await import('node:child_process')
+  const check = spawnSync(process.execPath, ['--check', apiTarget], { encoding: 'utf8' })
+  if (check.status !== 0) {
+    copyFileSync(backup, apiTarget)
+    throw new Error(`move-live-safe: syntax check failed after patching; rolled back.\n${check.stderr || check.stdout}`)
+  }
+  return [{ file: apiTarget, backup, changed: true, verified: check.stdout.trim() || 'syntax ok' }]
 }
