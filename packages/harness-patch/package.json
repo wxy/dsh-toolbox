@@ -4,7 +4,7 @@
   "description": "Plugin: apply the local session-area management patch to an installed DeepSeek Harness — drag-organization across workspaces/ungrouped/archived, archived folder, cross-directory moves, and resilience to corrupt logs. One command applies everything; idempotent, backed up, verified.",
   "type": "module",
   "bin": {
-    "wxy-harness-patch": "./bin/wxy-harness-patch.mjs"
+    "dtb-harness-patch": "./bin/dtb-harness-patch.mjs"
   },
   "files": [
     "bin",

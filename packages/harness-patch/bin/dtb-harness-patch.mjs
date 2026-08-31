@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * wxy-harness-patch — apply (or verify) the local resilience patch on the
+ * dtb-harness-patch — apply (or verify) the local resilience patch on the
  * installed DeepSeek Harness: session listing must survive corrupt logs.
  * Idempotent; original preserved at index.js.pre-resilience.bak; every apply
  * is behavior-verified in a fresh process (and rolled back on failure).
  * Re-run after harness upgrades.
  *
  * Usage:
- *   wxy-harness-patch [--dsh-install <path>]          resilience patch
- *   wxy-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
+ *   dtb-harness-patch [--dsh-install <path>]          resilience patch
+ *   dtb-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
  */
 import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
@@ -30,11 +30,11 @@ function parseArgs(argv) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
   if (flags.help === true || flags['-h'] === true) {
-    console.log(`wxy-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打本地补丁
+    console.log(`dtb-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打本地补丁
 
 用法（推荐）:
-  wxy-harness-patch                   一条命令应用全部补丁（幂等，升级 Harness 后重跑）
-  wxy-harness-patch --all             同上（显式）
+  dtb-harness-patch                   一条命令应用全部补丁（幂等，升级 Harness 后重跑）
+  dtb-harness-patch --all             同上（显式）
 
 高级（单独重打某一项，一般不需要）:
   --workspace-live / --workspace-live-v2 / --ungrouped-detach / --blue-bar
@@ -206,6 +206,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`wxy-harness-patch: ${error.message}`)
+  console.error(`dtb-harness-patch: ${error.message}`)
   process.exit(1)
 })

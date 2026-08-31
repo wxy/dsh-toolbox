@@ -34,7 +34,7 @@ Harness 读端对会话日志有两条独立契约：
 ## 判定方法（怎么确认日志坏了）
 
 1. 症状：打开某会话报 `corrupt session log: ...`，或整个界面（含模型列表）报 `handler failure`。
-2. 定位：`wxy-session-care health` 逐会话扫描，输出状态与原因：
+2. 定位：`dtb-session-care health` 逐会话扫描，输出状态与原因：
    - `corrupt`：可修复（帧布局错 / 重复段 / 前向空洞 / 不可解析行）。
    - `unrepairable`：header 本身损坏，无恢复前缀。
    - header id 与目录名不符：属于放错位置，手动改名或从备份恢复。
@@ -72,11 +72,11 @@ node -e '... 用 decodeStorageRecord 展开后检查 seq ...'
 #    使用 node:zlib zstdCompress，参数 ZSTD_c_checksumFlag=1
 #    [headerFrame][eventsFrame] 拼接
 
-# 6) 先备份原文件，再原子替换；重启 Harness 前建议再用 wxy-session-care health 复检
+# 6) 先备份原文件，再原子替换；重启 Harness 前建议再用 dtb-session-care health 复检
 ```
 
 ## 给 Harness 使用者的三条建议
 
-1. **升级后重跑 `wxy-harness-patch`**（npm 全局包升级会覆盖已打补丁的文件）。
-2. **不要用第三方工具把会话 JSONL 重压成单帧**；要改内容就用 `wxy-session-care repair`，它会保证帧布局。
-3. **归档 ≠ 删除**：归档的会话日志仍在 `~/.dsh/sessions/...` 下，只是 UI 不再显示；当前版本没有"取消归档"的入口，用 `wxy-workspace-ops unarchive`。
+1. **升级后重跑 `dtb-harness-patch`**（npm 全局包升级会覆盖已打补丁的文件）。
+2. **不要用第三方工具把会话 JSONL 重压成单帧**；要改内容就用 `dtb-session-care repair`，它会保证帧布局。
+3. **归档 ≠ 删除**：归档的会话日志仍在 `~/.dsh/sessions/...` 下，只是 UI 不再显示；当前版本没有"取消归档"的入口，用 `dtb-workspace-ops unarchive`。

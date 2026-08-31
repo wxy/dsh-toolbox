@@ -11,7 +11,7 @@
 | `session-care` | **纯命令行（离线）** | **修复会话文件损坏**——日志损坏可能导致整个 Harness 打不开、无法运行，用它体检并修复 |
 | `harness-patch` | **命令行打补丁，能力体现在 Harness 界面** | **会话区管理**：给已安装的 Harness 打补丁，让左侧会话区支持拖拽组织（工作区之间移动、工作区 ↔ 未分组 ↔ 归档全向拖动、归档文件夹、跨目录移动）。**一条命令全打包**；将来给 Harness 增加其他补丁用其他命令行参数 |
 
-> 一句话：**界面打不开 / 日志损坏用 `wxy-session-care` 修；想在界面上拖拽整理会话，用 `wxy-harness-patch` 打一次补丁即可（之后在界面操作，不需要命令行）。**
+> 一句话：**界面打不开 / 日志损坏用 `dtb-session-care` 修；想在界面上拖拽整理会话，用 `dtb-harness-patch` 打一次补丁即可（之后在界面操作，不需要命令行）。**
 
 ### 关于命名（官方术语）
 
@@ -32,7 +32,7 @@ cd dsh-toolbox
 make install        # 把两个命令软链到 ~/.dsh/tools/bin
 export PATH="$HOME/.dsh/tools/bin:$PATH"
 # 或者不装，直接 node 跑：
-# node packages/session-care/bin/wxy-session-care.mjs health
+# node packages/session-care/bin/dtb-session-care.mjs health
 ```
 
 ---
@@ -52,11 +52,11 @@ Harness 读端对会话日志有两条契约：**物理布局**（第一个 zstd
 ### 用法
 
 ```sh
-wxy-session-care health                       # 体检全部会话（默认根 ~/.dsh/sessions）
-wxy-session-care health --root /path/to/sessions --json
-wxy-session-care repair                       # 只看修复计划（dry run，不写盘）
-wxy-session-care repair --apply               # 真正修复（原文件保留为 .corrupt-<ts>）
-wxy-session-care repair --session <sessionId> --apply
+dtb-session-care health                       # 体检全部会话（默认根 ~/.dsh/sessions）
+dtb-session-care health --root /path/to/sessions --json
+dtb-session-care repair                       # 只看修复计划（dry run，不写盘）
+dtb-session-care repair --apply               # 真正修复（原文件保留为 .corrupt-<ts>）
+dtb-session-care repair --session <sessionId> --apply
 ```
 
 选项：`--root <dir>` 会话根目录；`--session <id>` 只处理指定会话；`--json`；`--compression <zstd|none>`；`--dsh-install <path>`。
@@ -82,7 +82,7 @@ wxy-session-care repair --session <sessionId> --apply
 在**已安装的 dsh 包**上打补丁（幂等、修改前自动备份、应用后自校验、失败自动回滚；`npm i -g` 升级 Harness 后需重跑）。**一条命令应用全部会话区补丁**：
 
 ```sh
-wxy-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重跑）
+dtb-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重跑）
 ```
 
 > 高级：将来给 Harness 增加其他补丁，用其他命令行参数单独应用；现有单个补丁也可单独重打（`--workspace-live` / `--blue-bar` / `--workspace-bundle` 等，见命令帮助）。
@@ -114,7 +114,7 @@ wxy-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重�
 `packages/workspace-ops` 的脚本能力（`list` / `move` / `unarchive`）**已并入 `harness-patch` 的界面功能**，不再作为独立命令安装。源码保留在仓库中，如需批量/脚本场景可手动运行：
 
 ```sh
-node packages/workspace-ops/bin/wxy-workspace-ops.mjs list
+node packages/workspace-ops/bin/dtb-workspace-ops.mjs list
 ```
 
 ---
@@ -123,11 +123,11 @@ node packages/workspace-ops/bin/wxy-workspace-ops.mjs list
 
 | 场景 | 用什么 |
 |---|---|
-| 打开会话报 `corrupt session log`，界面打不开 | `wxy-session-care health` → `repair --apply` |
-| 想在界面上拖拽整理会话（工作区/未分组/归档） | `wxy-harness-patch` 一次 → 刷新 + 重启一次 |
+| 打开会话报 `corrupt session log`，界面打不开 | `dtb-session-care health` → `repair --apply` |
+| 想在界面上拖拽整理会话（工作区/未分组/归档） | `dtb-harness-patch` 一次 → 刷新 + 重启一次 |
 | 侧边栏出现两个"未分组" | 那是补丁前的旧 bundle；重新应用补丁后归档文件夹显示为"归档" |
 | 归档的会话想找回/解除归档 | 界面：从归档文件夹拖到工作区/未分组；脚本：`workspace-ops`（可选） |
-| 升级 Harness 后 | 重跑 `wxy-harness-patch` |
+| 升级 Harness 后 | 重跑 `dtb-harness-patch` |
 
 ---
 
@@ -137,7 +137,7 @@ node packages/workspace-ops/bin/wxy-workspace-ops.mjs list
 
 ```sh
 npm i -g @dsh-toolbox/session-care @dsh-toolbox/harness-patch
-# 安装后命令为 wxy-session-care / wxy-harness-patch
+# 安装后命令为 dtb-session-care / dtb-harness-patch
 ```
 
 > 注：发布前需把对 `packages/core` 的相对引用改成对 `@dsh-toolbox/core` 的依赖（core 也要发布）。
