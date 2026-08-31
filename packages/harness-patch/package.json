@@ -1,0 +1,14 @@
+{
+  "name": "@dsh-toolbox/harness-patch",
+  "version": "0.1.0",
+  "description": "Plugin: local resilience patch for the installed DeepSeek Harness. Makes session listing tolerant to corrupt logs (one bad artifact no longer takes the whole session surface down). Idempotent, backed up, verified; re-run after harness upgrades.",
+  "type": "module",
+  "bin": {
+    "dsh-harness-patch": "./bin/harness-patch.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "license": "MIT"
+}

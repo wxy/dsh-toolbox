@@ -1,0 +1,54 @@
+# dsh-toolbox
+
+面向 DeepSeek Harness 的**个人小工具集**（monorepo）。官方不接受外部 PR，所以我们把这些修修补补的东西做成自己的工具，按用途拆成独立插件包维护，方便自己用、也方便分发给其他 Harness 用户。
+
+## 结构（按用途拆分）
+
+| 包 | 用途 | 命令 |
+|---|---|---|
+| `packages/session-care` | 会话日志健康检查与修复：扫描每个会话日志是否符合 Harness 读端的两条契约（zstd 帧布局 + 序号连续），精确报告损坏原因，并修复可恢复的日志（帧重打包 / 去重段 / 安全截断，原文件保留、修复后先自校验再落盘） | `dsh-session-care health` / `dsh-session-care repair [--apply]` |
+| `packages/harness-patch` | 已安装 Harness 的韧性补丁：会话列表对损坏日志宽容（一个坏日志不再拖垮整个界面/模型列表）。幂等、有备份、应用后行为自校验，升级 Harness 后重跑即可 | `dsh-harness-patch` |
+| `packages/workspace-ops` | 会话工作区管理：把"未分组"会话移入工作区、取消归档、查看归属。直接编辑 `workspace.json`（重启后生效） | `dsh-workspace-ops list / move / unarchive` |
+| `packages/core` | 共享底层：zstd 帧编解码（对齐 Harness 读端契约）、已安装 Harness 的探测 | — |
+
+## 安装与使用
+
+本仓库零第三方依赖（只用 Node 内置模块 + 从已安装的 Harness 里动态取 `decodeStorageRecord`），克隆后可直接用 Node 运行：
+
+```sh
+# 一键安装到 PATH（把三个命令软链到 ~/.dsh/tools/bin）
+make install
+# 或手动
+node packages/session-care/bin/session-care.mjs health
+node packages/harness-patch/bin/harness-patch.mjs
+node packages/workspace-ops/bin/workspace-ops.mjs list
+```
+
+常用流程：
+
+```sh
+dsh-session-care health                    # 体检所有会话日志
+dsh-session-care repair                    # 看修复计划（dry run）
+dsh-session-care repair --apply            # 真正修复（原文件备份为 .corrupt-<时间戳>）
+dsh-harness-patch                          # 给已安装 Harness 打韧性补丁（升级后重跑）
+dsh-workspace-ops move <sessionId> --workspace appilot
+dsh-workspace-ops unarchive <sessionId>
+```
+
+## 发给别人用（插件/分发）
+
+每个包都是标准 npm 包形状（`package.json` + `bin`），发布到 npm 后其他人可以直接：
+
+```sh
+npm i -g @dsh-toolbox/session-care @dsh-toolbox/harness-patch @dsh-toolbox/workspace-ops
+```
+
+> 注：发布前需把对 `packages/core` 的相对引用改成对 `@dsh-toolbox/core` 的依赖（core 也要发布）。工具定位是**离线/CLI 运维**（日志损坏时 Harness 往往已经不能正常加载，在线插件帮不上忙），所以暂不做 Cordis 运行时插件；如需 GUI 内入口（如 `/repair-session` 斜杠命令），可作为后续独立插件包，在 Harness 可正常加载时提供界面入口。
+
+## 文档
+
+- [事故复盘与修复手册](docs/playbook-session-corruption.md) — 2026-08 会话日志损坏事故的完整复盘：根因、判定方法、修复步骤、为什么"坏日志会拖垮整个界面"。
+
+## 许可
+
+MIT
