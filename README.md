@@ -48,11 +48,11 @@ Harness 读端对会话日志有两条契约：**物理布局**（第一个 zstd
 ### 用法
 
 ```sh
-dsh-session-care health                       # 体检全部会话（默认根 ~/.dsh/sessions）
-dsh-session-care health --root /path/to/sessions --json
-dsh-session-care repair                       # 只看修复计划（dry run，不写盘）
-dsh-session-care repair --apply               # 真正修复（原文件保留为 .corrupt-<ts>）
-dsh-session-care repair --session <sessionId> --apply   # 只修某一个会话
+wxy-session-care health                       # 体检全部会话（默认根 ~/.dsh/sessions）
+wxy-session-care health --root /path/to/sessions --json
+wxy-session-care repair                       # 只看修复计划（dry run，不写盘）
+wxy-session-care repair --apply               # 真正修复（原文件保留为 .corrupt-<ts>）
+wxy-session-care repair --session <sessionId> --apply   # 只修某一个会话
 ```
 
 选项：`--root <dir>` 会话根目录；`--session <id>` 只处理指定会话；`--json` 机器可读输出；`--compression <zstd|none>`；`--dsh-install <path>`。
@@ -83,15 +83,15 @@ dsh-session-care repair --session <sessionId> --apply   # 只修某一个会话
 **推荐一次性应用全部**（有依赖顺序，脚本会校验前置补丁是否已打）：
 
 ```sh
-dsh-harness-patch
-dsh-harness-patch --workspace-live
-dsh-harness-patch --workspace-live-v2
-dsh-harness-patch --ungrouped-detach
-dsh-harness-patch --blue-bar
-dsh-harness-patch --new-session-anchor
-dsh-harness-patch --ungrouped-anchor
-dsh-harness-patch --blank-visible
-dsh-harness-patch --detach-payload-fix
+wxy-harness-patch
+wxy-harness-patch --workspace-live
+wxy-harness-patch --workspace-live-v2
+wxy-harness-patch --ungrouped-detach
+wxy-harness-patch --blue-bar
+wxy-harness-patch --new-session-anchor
+wxy-harness-patch --ungrouped-anchor
+wxy-harness-patch --blank-visible
+wxy-harness-patch --detach-payload-fix
 ```
 
 应用后：**刷新浏览器**（客户端补丁立即生效）+ **重启一次 Harness**（host 侧补丁：韧性、attach、detach RPC 生效）。
@@ -120,10 +120,10 @@ dsh-harness-patch --detach-payload-fix
 ### 用法
 
 ```sh
-dsh-workspace-ops list                                # 查看归属
-dsh-workspace-ops list --json
-dsh-workspace-ops move <sessionId> --workspace appilot   # 移入工作区（id 或路径）
-dsh-workspace-ops unarchive <sessionId>               # 取消归档
+wxy-workspace-ops list                                # 查看归属
+wxy-workspace-ops list --json
+wxy-workspace-ops move <sessionId> --workspace appilot   # 移入工作区（id 或路径）
+wxy-workspace-ops unarchive <sessionId>               # 取消归档
 ```
 
 ### 适用时机
@@ -136,11 +136,11 @@ dsh-workspace-ops unarchive <sessionId>               # 取消归档
 
 | 场景 | 用什么 |
 |---|---|
-| 打开会话报 `corrupt session log`，界面打不开 | `dsh-session-care health` → `repair --apply` |
+| 打开会话报 `corrupt session log`，界面打不开 | `wxy-session-care health` → `repair --apply` |
 | 想在界面上把会话拖到别的工作区/未分组 | 装 `harness-patch` 全部补丁 → 刷新 + 重启一次 |
 | 未分组桶看不到东西 | `--blank-visible`（+ `--ungrouped-anchor`） |
-| 归档的会话想取消归档 | `dsh-workspace-ops unarchive <id>` |
-| 升级 Harness 后 | 重跑 `dsh-harness-patch` 全部补丁 |
+| 归档的会话想取消归档 | `wxy-workspace-ops unarchive <id>` |
+| 升级 Harness 后 | 重跑 `wxy-harness-patch` 全部补丁 |
 
 ---
 
@@ -150,6 +150,7 @@ dsh-workspace-ops unarchive <sessionId>               # 取消归档
 
 ```sh
 npm i -g @dsh-toolbox/session-care @dsh-toolbox/harness-patch @dsh-toolbox/workspace-ops
+# 安装后命令为 wxy-session-care / wxy-harness-patch / wxy-workspace-ops
 ```
 
 > 注：发布前需把对 `packages/core` 的相对引用改成对 `@dsh-toolbox/core` 的依赖（core 也要发布）。

@@ -4,7 +4,7 @@
   "description": "Plugin: session workspace management for the DeepSeek Harness — move an ungrouped session into a workspace, unarchive archived sessions, and summarize workspace accounting. Edits workspace.json (takes effect at the next harness restart).",
   "type": "module",
   "bin": {
-    "dsh-workspace-ops": "./bin/workspace-ops.mjs"
+    "wxy-workspace-ops": "./bin/workspace-ops.mjs"
   },
   "files": [
     "bin",

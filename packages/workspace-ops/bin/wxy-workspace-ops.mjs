@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * dsh-workspace-ops — session workspace management: attach an ungrouped
+ * wxy-workspace-ops — session workspace management: attach an ungrouped
  * session to a workspace, unarchive archived sessions, summarize accounting.
  *
  * Usage:
- *   dsh-workspace-ops list [--json]
- *   dsh-workspace-ops move <sessionId> [--workspace <workspaceId|path>]
- *   dsh-workspace-ops unarchive <sessionId>
+ *   wxy-workspace-ops list [--json]
+ *   wxy-workspace-ops move <sessionId> [--workspace <workspaceId|path>]
+ *   wxy-workspace-ops unarchive <sessionId>
  *
  * Edits $DSH_HOME/storages/workspace.json (with a timestamped backup). The
  * running harness holds this file in memory and re-reads it only at startup,
@@ -15,12 +15,12 @@
  * memory and would drop the edit).
  */
 
-const HELP = `dsh-workspace-ops — 会话工作区管理
+const HELP = `wxy-workspace-ops — DeepSeek Harness 工具集（dsh-toolbox）· 会话工作区管理
 
 用法:
-  dsh-workspace-ops list [--json]
-  dsh-workspace-ops move <sessionId> [--workspace <workspaceId|路径>]
-  dsh-workspace-ops unarchive <sessionId>
+  wxy-workspace-ops list [--json]
+  wxy-workspace-ops move <sessionId> [--workspace <workspaceId|路径>]
+  wxy-workspace-ops unarchive <sessionId>
 
 说明:
   move 把"未分组"的会话挂到指定工作区（缺省 --workspace 时，若只有一个工作区则用那个）。
@@ -98,6 +98,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`dsh-workspace-ops: ${error.message}`)
+  console.error(`wxy-workspace-ops: ${error.message}`)
   process.exit(1)
 })

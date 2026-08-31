@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * dsh-harness-patch — apply (or verify) the local resilience patch on the
+ * wxy-harness-patch — apply (or verify) the local resilience patch on the
  * installed DeepSeek Harness: session listing must survive corrupt logs.
  * Idempotent; original preserved at index.js.pre-resilience.bak; every apply
  * is behavior-verified in a fresh process (and rolled back on failure).
  * Re-run after harness upgrades.
  *
  * Usage:
- *   dsh-harness-patch [--dsh-install <path>]          resilience patch
- *   dsh-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
+ *   wxy-harness-patch [--dsh-install <path>]          resilience patch
+ *   wxy-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
  */
 import { findDshInstall } from '../../core/src/harness.mjs'
 
@@ -30,11 +30,11 @@ function parseArgs(argv) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
   if (flags.help === true || flags['-h'] === true) {
-    console.log(`dsh-harness-patch — 给已安装的 Harness 打本地补丁
+    console.log(`wxy-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打本地补丁
 
 用法:
-  dsh-harness-patch [--dsh-install <path>]              韧性补丁（坏日志不拖垮界面）
-  dsh-harness-patch --workspace-live [--dsh-install <path>]   实时跨工作区移动会话
+  wxy-harness-patch [--dsh-install <path>]              韧性补丁（坏日志不拖垮界面）
+  wxy-harness-patch --workspace-live [--dsh-install <path>]   实时跨工作区移动会话
 
 说明:
   • 幂等：已打过则直接跳过；修改前备份原文件。
@@ -139,6 +139,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`dsh-harness-patch: ${error.message}`)
+  console.error(`wxy-harness-patch: ${error.message}`)
   process.exit(1)
 })

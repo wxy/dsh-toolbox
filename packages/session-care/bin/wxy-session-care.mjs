@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * dsh-session-care — session-log health check and repair (the "no more bricked
+ * wxy-session-care — session-log health check and repair (the "no more bricked
  * harness because of one bad log" plugin).
  *
  * Usage:
- *   dsh-session-care health [--root <dir>] [--session <id>] [--json]
- *   dsh-session-care repair [--root <dir>] [--session <id>] [--apply] [--json]
+ *   wxy-session-care health [--root <dir>] [--session <id>] [--json]
+ *   wxy-session-care repair [--root <dir>] [--session <id>] [--apply] [--json]
  *
  * Default root: $DSH_HOME/sessions (~/.dsh/sessions). repair is a dry run
  * unless --apply is given; every written repair preserves the original at
@@ -15,11 +15,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { findDshInstall } from '../../core/src/harness.mjs'
 
-const HELP = `dsh-session-care — 会话日志健康检查与修复
+const HELP = `wxy-session-care — DeepSeek Harness 工具集（dsh-toolbox）· 会话日志健康检查与修复
 
 用法:
-  dsh-session-care health [--root <dir>] [--session <id>] [--json]
-  dsh-session-care repair [--root <dir>] [--session <id>] [--apply] [--json]
+  wxy-session-care health [--root <dir>] [--session <id>] [--json]
+  wxy-session-care repair [--root <dir>] [--session <id>] [--apply] [--json]
 
 选项:
   --root <dir>      会话根目录（默认 $DSH_HOME/sessions）
@@ -85,7 +85,7 @@ async function main() {
       }
       console.log(bad === 0
         ? `\n全部 ${filtered.length} 个会话日志健康。`
-        : `\n发现 ${bad} 个问题日志；运行 "dsh-session-care repair --apply" 尝试修复。`)
+        : `\n发现 ${bad} 个问题日志；运行 "wxy-session-care repair --apply" 尝试修复。`)
     }
     return
   }
@@ -115,6 +115,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`dsh-session-care: ${error.message}`)
+  console.error(`wxy-session-care: ${error.message}`)
   process.exit(1)
 })
