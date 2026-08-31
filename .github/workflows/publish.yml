@@ -1,8 +1,12 @@
 name: publish to npm
 
 # 触发：推送任意 v* 标签（例如 git tag v0.1.0 && git push --tags）
-# 前提：仓库 Settings → Secrets and variables → Actions 里配置 NPM_TOKEN
-#       （npmjs.com → Access Tokens 生成的 publish/automation 类型 token）
+#
+# 采用 npm Trusted Publishing（OIDC）：
+#   - 不需要 NPM_TOKEN secret，也不需要在 GitHub 配任何 secret；
+#   - 前提：npmjs.com 上为 @dsh-toolbox 组织（或每个包）启用 Trusted Publishing，
+#     并把发布者指向本仓库，subject 类似 repo:wxy/dsh-toolbox:ref:refs/tags/v*；
+#   - 本地手动发布仍用 npm login（Trusted Publishing 只用于 CI/CD）。
 on:
   push:
     tags:
@@ -13,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write   # npm 用 OIDC 身份令牌换取临时发布令牌（Trusted Publishing 必需）
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,15 +28,9 @@ jobs:
       - name: Publish @dsh-toolbox/core
         working-directory: packages/core
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @dsh-toolbox/session-care
         working-directory: packages/session-care
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @dsh-toolbox/harness-patch
         working-directory: packages/harness-patch
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
