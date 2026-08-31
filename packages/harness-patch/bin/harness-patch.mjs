@@ -45,7 +45,7 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2 } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch } = await import('../src/patch.mjs')
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -62,6 +62,15 @@ async function main() {
       else console.log('已应用 v2:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: v2 需要先应用 v1；刷新浏览器即可看到高亮与实时更新（无需重启）。')
+    return
+  }
+  if (flags['ungrouped-detach'] === true) {
+    const results = await applyUngroupedDetachPatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 需要先应用 workspace-live（v1）。host 侧需重启 Harness；刷新浏览器后未分组桶会常驻显示，可把工作区里的会话拖进未分组。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)

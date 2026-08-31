@@ -481,3 +481,223 @@ export async function applyWorkspaceLivePatchV2(dshInstall) {
   ))
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- ungrouped detach patch (v3): drag sessions OUT of workspaces -----------
+
+const DETACH_MARKER = 'dsh-toolbox ungrouped-detach'
+
+const DETACH_HOST_CMD_OLD = `				return ok(request, { workspace: workspaceView(workspace) });
+			},
+			async archiveSession(request) {`
+
+const DETACH_HOST_CMD_NEW = `				return ok(request, { workspace: workspaceView(workspace) });
+			},
+			async detachSession(request) {
+				const { payload } = request;
+				const workspace = ctx.workspaceRegistry.get(WorkspaceId(payload.workspaceId));
+				if (workspace === void 0) return workspaceNotFound(request, payload.workspaceId);
+				await workspace.detachSession(payload.sessionId);
+				return ok(request, { workspace: workspaceView(workspace) });
+			},
+			async archiveSession(request) {`
+
+const DETACH_HOST_SCHEMA_OLD = `/** workspace.insertSessionBefore response value. */
+const workspaceInsertSessionBeforeValueSchema = z$1.object({ workspace: workspaceViewSchema });`
+
+const DETACH_HOST_SCHEMA_NEW = `/** workspace.insertSessionBefore response value. */
+const workspaceInsertSessionBeforeValueSchema = z$1.object({ workspace: workspaceViewSchema });
+/** workspace.detachSession request payload (dsh-toolbox ungrouped-detach). */
+const workspaceDetachSessionRequestSchema = z$1.object({
+	workspaceId: workspaceIdSchema,
+	sessionId: sessionIdSchema
+});
+/** workspace.detachSession response value (dsh-toolbox ungrouped-detach). */
+const workspaceDetachSessionValueSchema = z$1.object({ workspace: workspaceViewSchema });`
+
+const DETACH_HOST_REGISTRY_OLD = `		invoke: (api, r) => api.workspace.insertSessionBefore(r)
+	},
+	"workspace.archiveSession": {`
+
+const DETACH_HOST_REGISTRY_NEW = `		invoke: (api, r) => api.workspace.insertSessionBefore(r)
+	},
+	"workspace.detachSession": {
+		schema: workspaceDetachSessionRequestSchema,
+		invoke: (api, r) => api.workspace.detachSession(r)
+	},
+	"workspace.archiveSession": {`
+
+const DETACH_HOST_VALUE_MAP_OLD = `	"workspace.insertSessionBefore": workspaceInsertSessionBeforeValueSchema,
+	"workspace.archiveSession": workspaceArchiveSessionValueSchema,`
+
+const DETACH_HOST_VALUE_MAP_NEW = `	"workspace.insertSessionBefore": workspaceInsertSessionBeforeValueSchema,
+	"workspace.detachSession": workspaceDetachSessionValueSchema,
+	"workspace.archiveSession": workspaceArchiveSessionValueSchema,`
+
+const DETACH_CLIENT_STRAY_OLD = `			if (stray.length > 0) groups.push(buildGroup("", void 0, void 0, void 0, UNGROUPED_LABEL, ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));`
+
+const DETACH_CLIENT_STRAY_NEW = `			// dsh-toolbox ungrouped-detach: the ungrouped bucket is always
+			// rendered so it can serve as a drop target for moving sessions out
+			// of a workspace (detaching). An empty bucket just shows the header.
+			groups.push(buildGroup("", void 0, void 0, void 0, UNGROUPED_LABEL, ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));`
+
+const DETACH_CLIENT_MARKER_OLD = `sessionDropMarker !== null && sessionDropMarker.id === workspaceId && (sessionDropMarker.half === "before" ? WorkspaceBrowser_module_css_default.workspaceDropBefore : WorkspaceBrowser_module_css_default.workspaceDropAfter)),`
+
+const DETACH_CLIENT_MARKER_NEW = `sessionDropMarker !== null && sessionDropMarker.id === group.key && (sessionDropMarker.half === "before" ? WorkspaceBrowser_module_css_default.workspaceDropBefore : WorkspaceBrowser_module_css_default.workspaceDropAfter)),`
+
+const DETACH_CLIENT_DROP_OLD = `								onDragOver: (workspaceDrag === null && drag === null) || hoverWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									if (drag !== null && workspaceId !== void 0) {
+										setSessionDropMarker({ id: workspaceId, half: workspaceGroupHalf(e) });
+									} else {
+										hoverWorkspace(workspaceGroupHalf(e));
+									}
+								},
+								onDrop: (workspaceDrag === null && drag === null) || dropWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									if (drag !== null && workspaceId !== void 0) {
+										commitSessionToWorkspaceDrag(drag, workspaceId);
+									} else {
+										dropWorkspace(workspaceGroupHalf(e));
+									}
+								},`
+
+const DETACH_CLIENT_DROP_NEW = `								onDragOver: drag !== null || (workspaceDrag !== null && workspaceId !== void 0) ? (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									if (drag !== null) {
+										setSessionDropMarker({ id: group.key, half: "after" });
+									} else {
+										hoverWorkspace(workspaceGroupHalf(e));
+									}
+								} : void 0,
+								onDrop: drag !== null || (workspaceDrag !== null && workspaceId !== void 0) ? (e) => {
+									e.preventDefault();
+									if (drag !== null) {
+										if (workspaceId !== void 0) commitSessionToWorkspaceDrag(drag, workspaceId);
+										else commitSessionToUngroupedDrag(drag);
+									} else {
+										dropWorkspace(workspaceGroupHalf(e));
+									}
+								} : void 0,`
+
+const DETACH_CLIENT_UNGROUPED_FN_OLD = `					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const DETACH_CLIENT_UNGROUPED_FN_NEW = `					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};
+			const commitSessionToUngroupedDrag = (activeDrag) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const owner = workspaces.find((workspace) => workspace.sessionIds.includes(activeDrag.sessionId));
+				if (owner === void 0) return;
+				detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const DETACH_CLIENT_ST_PROPS_OLD = `function SessionTree({ useSessions, startSession, open, forkSession, workspaces, archivedSessionIds, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, insertWorkspaceBefore, insertSessionBefore, orderBy, groupExpansion, setGroupExpanded, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t }) {`
+
+const DETACH_CLIENT_ST_PROPS_NEW = `function SessionTree({ useSessions, startSession, open, forkSession, workspaces, archivedSessionIds, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, insertWorkspaceBefore, insertSessionBefore, detachSession, orderBy, groupExpansion, setGroupExpanded, sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t }) {`
+
+const DETACH_CLIENT_WB_PROPS_OLD = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostDescription, renderSlot, t }) {`
+
+const DETACH_CLIENT_WB_PROPS_NEW = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, open, renameSession, forkSession, renameWorkspace, deleteWorkspace, insertWorkspaceBefore, archiveSession, insertSessionBefore, detachSession, createWorkspace, searchSessions, searchResultLimit, useDirectoryFlow, useHostDescription, renderSlot, t }) {`
+
+const DETACH_CLIENT_WB_RENDER_OLD = `							insertWorkspaceBefore,
+							insertSessionBefore,
+							orderBy,`
+
+const DETACH_CLIENT_WB_RENDER_NEW = `							insertWorkspaceBefore,
+							insertSessionBefore,
+							detachSession,
+							orderBy,`
+
+const DETACH_CLIENT_INJECT_OLD = `				insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
+					await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+const DETACH_CLIENT_INJECT_NEW = `				insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
+					await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},
+				detachSession: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.detachSession", { args: { workspaceId, sessionId } }, void 0);
+					if (!result.ok) throw new Error('workspace detach failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+/**
+ * ungrouped-detach (v3): let sessions be dragged OUT of a workspace into the
+ * (now always-present) ungrouped bucket. Requires v1+v2.
+ *  - host: new workspace.detachSession RPC (domain detachSession exists)
+ *  - client: the ungrouped bucket is always rendered so it is a drop target;
+ *    dropping a workspace session on it calls detach + refresh; the drop
+ *    highlight is keyed by group so the ungrouped row lights up too.
+ */
+export async function applyUngroupedDetachPatch(dshInstall) {
+  const hostTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  for (const target of [hostTarget, clientTarget]) {
+    if (!existsSync(target)) throw new Error(`ungrouped-detach target not found: ${target}`)
+  }
+  const results = []
+
+  const hostOriginal = readFileSync(hostTarget, 'utf8')
+  if (!hostOriginal.includes(DETACH_MARKER)) {
+    const hostPairs = [
+      [DETACH_HOST_CMD_OLD, DETACH_HOST_CMD_NEW],
+      [DETACH_HOST_SCHEMA_OLD, DETACH_HOST_SCHEMA_NEW],
+      [DETACH_HOST_REGISTRY_OLD, DETACH_HOST_REGISTRY_NEW],
+      [DETACH_HOST_VALUE_MAP_OLD, DETACH_HOST_VALUE_MAP_NEW],
+    ]
+    for (const [oldText] of hostPairs) {
+      if (!hostOriginal.includes(oldText)) throw new Error('ungrouped-detach: host build changed; aborting')
+    }
+    const backup = `${hostTarget}.pre-ungrouped-detach.bak`
+    if (!existsSync(backup)) copyFileSync(hostTarget, backup)
+    let next = hostOriginal
+    for (const [oldText, newText] of hostPairs) next = next.replace(oldText, newText)
+    writeFileSync(hostTarget, next)
+    results.push({ file: hostTarget, backup, changed: true })
+  } else {
+    results.push({ file: hostTarget, alreadyPatched: true })
+  }
+
+  const clientOriginal = readFileSync(clientTarget, 'utf8')
+  if (!clientOriginal.includes(DETACH_MARKER)) {
+    if (!clientOriginal.includes('const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {')) {
+      throw new Error('ungrouped-detach: workspace-live v1 is not applied; run --workspace-live first')
+    }
+    const clientPairs = [
+      [DETACH_CLIENT_STRAY_OLD, DETACH_CLIENT_STRAY_NEW],
+      [DETACH_CLIENT_MARKER_OLD, DETACH_CLIENT_MARKER_NEW],
+      [DETACH_CLIENT_DROP_OLD, DETACH_CLIENT_DROP_NEW],
+      [DETACH_CLIENT_UNGROUPED_FN_OLD, DETACH_CLIENT_UNGROUPED_FN_NEW],
+      [DETACH_CLIENT_ST_PROPS_OLD, DETACH_CLIENT_ST_PROPS_NEW],
+      [DETACH_CLIENT_WB_PROPS_OLD, DETACH_CLIENT_WB_PROPS_NEW],
+      [DETACH_CLIENT_WB_RENDER_OLD, DETACH_CLIENT_WB_RENDER_NEW],
+      [DETACH_CLIENT_INJECT_OLD, DETACH_CLIENT_INJECT_NEW],
+    ]
+    for (const [oldText] of clientPairs) {
+      if (!clientOriginal.includes(oldText)) throw new Error('ungrouped-detach: a client text block no longer matches; aborting')
+    }
+    const backup = `${clientTarget}.pre-ungrouped-detach.bak`
+    if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+    let next = clientOriginal
+    for (const [oldText, newText] of clientPairs) next = next.replace(oldText, newText)
+    writeFileSync(clientTarget, next)
+    results.push({ file: clientTarget, backup, changed: true })
+  } else {
+    results.push({ file: clientTarget, alreadyPatched: true })
+  }
+  return results
+}

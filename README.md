@@ -7,7 +7,7 @@
 | 包 | 用途 | 命令 |
 |---|---|---|
 | `packages/session-care` | 会话日志健康检查与修复：扫描每个会话日志是否符合 Harness 读端的两条契约（zstd 帧布局 + 序号连续），精确报告损坏原因，并修复可恢复的日志（帧重打包 / 去重段 / 安全截断，原文件保留、修复后先自校验再落盘） | `dsh-session-care health` / `dsh-session-care repair [--apply]` |
-| `packages/harness-patch` | 已安装 Harness 的本地补丁：① 韧性补丁——会话列表对损坏日志宽容（一个坏日志不再拖垮整个界面/模型列表）；② workspace-live——跨工作区**实时**移动会话（host 侧 `insertSessionBefore` 自动挂账 + 客户端支持把会话拖到工作区行）。幂等、有备份、应用后自校验，升级 Harness 后重跑即可 | `dsh-harness-patch [--workspace-live]` |
+| `packages/harness-patch` | 已安装 Harness 的本地补丁：① 韧性补丁——会话列表对损坏日志宽容；② workspace-live——跨工作区**实时**移动会话（host `insertSessionBefore` 自动挂账 + 客户端把会话拖到工作区行，含落点高亮与移动后自动刷新）；③ ungrouped-detach——**未分组桶常驻显示**，新增 `workspace.detachSession` RPC，可把工作区里的会话拖进未分组。幂等、有备份、应用后自校验，升级 Harness 后重跑即可 | `dsh-harness-patch [--workspace-live] [--workspace-live-v2] [--ungrouped-detach]` |
 | `packages/workspace-ops` | 会话工作区管理：把"未分组"会话移入工作区、取消归档、查看归属。直接编辑 `workspace.json`（重启后生效） | `dsh-workspace-ops list / move / unarchive` |
 | `packages/core` | 共享底层：zstd 帧编解码（对齐 Harness 读端契约）、已安装 Harness 的探测 | — |
 
@@ -32,6 +32,8 @@ dsh-session-care repair                    # 看修复计划（dry run）
 dsh-session-care repair --apply            # 真正修复（原文件备份为 .corrupt-<时间戳>）
 dsh-harness-patch                          # 给已安装 Harness 打韧性补丁（升级后重跑）
 dsh-harness-patch --workspace-live         # 实时跨工作区移动（拖拽会话到工作区行）
+dsh-harness-patch --workspace-live-v2      # 落点高亮 + 移动后自动展开/刷新（无需重启）
+dsh-harness-patch --ungrouped-detach       # 未分组桶常驻 + 拖出工作区到未分组（host 需重启一次）
 dsh-workspace-ops move <sessionId> --workspace appilot
 dsh-workspace-ops unarchive <sessionId>
 ```
