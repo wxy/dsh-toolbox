@@ -1940,7 +1940,9 @@ export async function applyMovePersistenceFix(dshInstall) {
   const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
   if (!existsSync(apiTarget)) throw new Error(`move-persistence-fix target not found: ${apiTarget}`)
   const original = readFileSync(apiTarget, 'utf8')
-  if (original.includes(MOVEPERSIST_MARKER)) return [{ file: apiTarget, alreadyPatched: true }]
+  if (original.includes(MOVEPERSIST_MARKER) || original.includes(W13_NEW)) {
+    return [{ file: apiTarget, alreadyPatched: true }]
+  }
   if (!original.includes(W13_OLD)) {
     throw new Error('move-persistence-fix: the persistence access line no longer matches; aborting')
   }
@@ -1948,4 +1950,73 @@ export async function applyMovePersistenceFix(dshInstall) {
   if (!existsSync(backup)) copyFileSync(apiTarget, backup)
   writeFileSync(apiTarget, original.replace(W13_OLD, W13_NEW))
   return [{ file: apiTarget, backup, changed: true }]
+}
+
+// --- empty-group drop placeholder (v14): a real landing row in empty groups
+
+const EMPTYDROP_MARKER = 'dsh-toolbox empty-drop-row'
+
+const W14_CLASS_OLD = `								className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter, sessionDropMarker !== null && sessionDropMarker.id === group.key && (sessionDropMarker.half === "before" ? Rows_module_css_default.dropBefore : Rows_module_css_default.dropAfter)),`
+
+const W14_CLASS_NEW = `								className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),`
+
+const W14_ROW_OLD = `										children: expandedSessionGroups.includes(group.key) ? t("sessions.collapse") : t("sessions.expand", { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })
+									})
+								]`
+
+const W14_ROW_NEW = `										children: expandedSessionGroups.includes(group.key) ? t("sessions.collapse") : t("sessions.expand", { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })
+									}),
+									group.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {
+										className: clsx(Rows_module_css_default.sessionRow, sessionDropMarker !== null && sessionDropMarker.id === group.key ? (sessionDropMarker.half === "before" ? Rows_module_css_default.dropBefore : Rows_module_css_default.dropAfter) : void 0),
+										onDragOver: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											e.dataTransfer.dropEffect = "move";
+											setSessionDropMarker({ id: group.key, half: "after" });
+										},
+										onDrop: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											if (drag !== null) {
+												if (workspaceId !== void 0) commitSessionToWorkspaceDrag(drag, workspaceId);
+												else if (group.key === "") commitSessionToUngroupedDrag(drag);
+												else if (group.key === "archived") commitSessionToArchiveDrag(drag);
+											}
+										},
+										children: (0, react_jsx_runtime.jsx)("span", {
+											className: Rows_module_css_default.title,
+											children: "（空）拖放到此处"
+										})
+									})
+								]`
+
+/**
+ * empty-drop-row (v14): an empty workspace/group had no session rows, so a
+ * drag over it showed no blue-bar landing point. Empty groups now render a
+ * real session-row placeholder ("（空）拖放到此处") that is itself the drop
+ * target: it lights up with the blue insertion bar on hover and drops into
+ * the group's normal handler (workspace: attach/move; ungrouped: detach;
+ * archived: archive). The group-section-level highlight is removed in favor
+ * of the row-level bar.
+ */
+export async function applyEmptyDropRowPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`empty-drop-row target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(EMPTYDROP_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  const pairs = [
+    [W14_CLASS_OLD, W14_CLASS_NEW],
+    [W14_ROW_OLD, W14_ROW_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('empty-drop-row: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-empty-drop-row.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('group.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {',
+    `// dsh-toolbox empty-drop-row\n\t\t\t\t\t\t\t\t\tgroup.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
 }
