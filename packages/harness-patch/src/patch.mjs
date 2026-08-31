@@ -1133,3 +1133,37 @@ export async function applyUngroupedAnchorPatch(dshInstall) {
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- ungrouped blank-visible (v7): blank sessions show under ungrouped ------
+
+const BLANKVISIBLE_MARKER = 'dsh-toolbox ungrouped-blank-visible'
+
+const B7_STRAY_OLD = `			const stray = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && !accounted.has(s.id) && sessionVisible(s, list.current, archived));`
+
+const B7_STRAY_NEW = `			// dsh-toolbox ungrouped-blank-visible: blank (empty) sessions are
+			// normally hidden from the sidebar, which made the ungrouped bucket
+			// look empty and unusable (no visible anchor). The ungrouped bucket
+			// shows its blank sessions so there is always an openable row and a
+			// drop anchor; workspace buckets keep the default hiding.
+			const stray = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && !accounted.has(s.id) && s.origin !== "subagent" && !archived.has(s.id));`
+
+/**
+ * ungrouped blank-visible (v7): relax the sidebar visibility rule for the
+ * ungrouped bucket so blank (empty) sessions are shown there. sessionVisible
+ * hides blank sessions by default, so both the pre-existing empty session and
+ * any auto-created one were invisible and the bucket had no anchor. Blank
+ * sessions remain hidden inside workspace buckets (default behavior).
+ */
+export async function applyUngroupedBlankVisiblePatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`ungrouped-blank-visible target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(BLANKVISIBLE_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes(B7_STRAY_OLD)) {
+    throw new Error('ungrouped-blank-visible: the stray filter no longer matches; aborting without touching the bundle')
+  }
+  const backup = `${clientTarget}.pre-ungrouped-blank-visible.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  writeFileSync(clientTarget, original.replace(B7_STRAY_OLD, B7_STRAY_NEW))
+  return [{ file: clientTarget, backup, changed: true }]
+}
