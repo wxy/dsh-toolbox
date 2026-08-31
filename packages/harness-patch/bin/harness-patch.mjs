@@ -45,7 +45,7 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch } = await import('../src/patch.mjs')
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -80,6 +80,15 @@ async function main() {
       else console.log('已应用:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: 需要先应用 workspace-live(v1)/ungrouped-detach(v3)。刷新浏览器即可——拖拽会话跨组时显示蓝色插入条，落点即插入位置。')
+    return
+  }
+  if (flags['new-session-anchor'] === true) {
+    const results = await applyUngroupedNewSessionPatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 刷新浏览器即可——未分组桶下出现"＋ 新会话"锚点（点击创建未分组会话，也是拖拽落点）。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)

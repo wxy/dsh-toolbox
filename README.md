@@ -7,7 +7,7 @@
 | 包 | 用途 | 命令 |
 |---|---|---|
 | `packages/session-care` | 会话日志健康检查与修复：扫描每个会话日志是否符合 Harness 读端的两条契约（zstd 帧布局 + 序号连续），精确报告损坏原因，并修复可恢复的日志（帧重打包 / 去重段 / 安全截断，原文件保留、修复后先自校验再落盘） | `dsh-session-care health` / `dsh-session-care repair [--apply]` |
-| `packages/harness-patch` | 已安装 Harness 的本地补丁：① 韧性补丁——会话列表对损坏日志宽容；② workspace-live——跨工作区**实时**移动会话（host `insertSessionBefore` 自动挂账 + 客户端把会话拖到工作区行，含落点高亮与移动后自动刷新）；③ ungrouped-detach——**未分组桶常驻显示**，新增 `workspace.detachSession` RPC，可把工作区里的会话拖进未分组；④ blue-bar——跨组拖拽显示**蓝色插入条**（与同组排序一致），落点即精确插入位置（可插到指定会话前/后），组头落点同样用蓝条。幂等、有备份、应用后自校验，升级 Harness 后重跑即可 | `dsh-harness-patch [--workspace-live] [--workspace-live-v2] [--ungrouped-detach] [--blue-bar]` |
+| `packages/harness-patch` | 已安装 Harness 的本地补丁：① 韧性补丁——会话列表对损坏日志宽容；② workspace-live——跨工作区**实时**移动会话（host `insertSessionBefore` 自动挂账 + 客户端把会话拖到工作区行，含落点高亮与移动后自动刷新）；③ ungrouped-detach——**未分组桶常驻显示**，新增 `workspace.detachSession` RPC，可把工作区里的会话拖进未分组；④ blue-bar——跨组拖拽显示**蓝色插入条**（与同组排序一致），落点即精确插入位置（可插到指定会话前/后），组头落点同样用蓝条；⑤ new-session-anchor——未分组桶下常驻**"＋ 新会话"锚点**：点击即在未分组下创建新会话（cwd 取当前工作区，便于日后挂回），也是工作区会话拖入未分组的落点。幂等、有备份、应用后自校验，升级 Harness 后重跑即可 | `dsh-harness-patch [--workspace-live] [--workspace-live-v2] [--ungrouped-detach] [--blue-bar] [--new-session-anchor]` |
 | `packages/workspace-ops` | 会话工作区管理：把"未分组"会话移入工作区、取消归档、查看归属。直接编辑 `workspace.json`（重启后生效） | `dsh-workspace-ops list / move / unarchive` |
 | `packages/core` | 共享底层：zstd 帧编解码（对齐 Harness 读端契约）、已安装 Harness 的探测 | — |
 
@@ -35,6 +35,7 @@ dsh-harness-patch --workspace-live         # 实时跨工作区移动（拖拽�
 dsh-harness-patch --workspace-live-v2      # 落点高亮 + 移动后自动展开/刷新（无需重启）
 dsh-harness-patch --ungrouped-detach       # 未分组桶常驻 + 拖出工作区到未分组（host 需重启一次）
 dsh-harness-patch --blue-bar               # 跨组拖拽用蓝色插入条指示精确插入位置
+dsh-harness-patch --new-session-anchor     # 未分组桶下"＋ 新会话"锚点（点击创建 + 拖拽落点）
 dsh-workspace-ops move <sessionId> --workspace appilot
 dsh-workspace-ops unarchive <sessionId>
 ```

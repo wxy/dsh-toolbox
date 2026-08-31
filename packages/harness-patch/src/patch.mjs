@@ -898,3 +898,122 @@ export async function applyBlueBarDragPatch(dshInstall) {
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- ungrouped new-session anchor (v5): create + drop anchor under ungrouped
+
+const NEWSESSION_MARKER = 'dsh-toolbox ungrouped-new-session'
+
+const N5_CREATE_OLD = `										onCreate: () => {
+											if (group.workspaceId !== void 0) {
+												setGroupExpanded(group.key, true);
+												startSession(group.workspaceId);
+											}
+										},`
+
+const N5_CREATE_NEW = `										onCreate: () => {
+											if (group.workspaceId !== void 0) {
+												setGroupExpanded(group.key, true);
+												startSession(group.workspaceId);
+											} else {
+												createUngroupedSession();
+											}
+										},`
+
+const N5_ANCHOR_OLD = `										children: expandedSessionGroups.includes(group.key) ? t("sessions.collapse") : t("sessions.expand", { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })
+									})
+								]`
+
+const N5_ANCHOR_NEW = `										children: expandedSessionGroups.includes(group.key) ? t("sessions.collapse") : t("sessions.expand", { n: group.sessions.length - COLLAPSED_SESSION_LIMIT })
+									}),
+									group.key === "" && (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										className: clsx(Rows_module_css_default.sessionRow, WorkspaceBrowser_module_css_default.sessionOverflowButton),
+										title: t("actions.newSession.aria", { name: "" }),
+										onClick: () => {
+											createUngroupedSession();
+										},
+										onDragOver: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											e.dataTransfer.dropEffect = "move";
+											setSessionDropMarker({ id: group.key, half: "after" });
+										},
+										onDrop: drag === null ? void 0 : (e) => {
+											e.preventDefault();
+											if (drag !== null) commitSessionToUngroupedDrag(drag);
+										},
+										children: "＋ 新会话"
+									})
+								]`
+
+const N5_ST_PROPS_OLD = `function SessionTree({ useSessions, startSession, open, forkSession,`
+
+const N5_ST_PROPS_NEW = `function SessionTree({ useSessions, startSession, createUngroupedSession, open, forkSession,`
+
+const N5_WB_PROPS_OLD = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, open, renameSession,`
+
+const N5_WB_PROPS_NEW = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, createUngroupedSession, open, renameSession,`
+
+const N5_RENDER_OLD = `							startSession,
+							open,`
+
+const N5_RENDER_NEW = `							startSession,
+							createUngroupedSession,
+							open,`
+
+const N5_INJECT_OLD = `				detachSession: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.detachSession", { args: { workspaceId, sessionId } }, void 0);
+					if (!result.ok) throw new Error('workspace detach failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+const N5_INJECT_NEW = `				detachSession: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.detachSession", { args: { workspaceId, sessionId } }, void 0);
+					if (!result.ok) throw new Error('workspace detach failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},
+				createUngroupedSession: async () => {
+					const snapshot = ctx.workspaces.list.getSnapshot();
+					const items = snapshot?.items ?? [];
+					const current = ctx.sessions.list.getSnapshot().current;
+					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
+					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", { args: payload }, void 0);
+					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await ctx.sessions.open(result.value.sessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+/**
+ * ungrouped new-session anchor (v5): a "＋ 新会话" row under the ungrouped
+ * bucket. Clicking creates a session NOT attached to any workspace (cwd = the
+ * current/first workspace path, so it can be attached later); the row is also
+ * a drop anchor — dragging a workspace session onto it detaches it into
+ * ungrouped, with the blue-bar feedback. Requires v1-v4.
+ */
+export async function applyUngroupedNewSessionPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`ungrouped-new-session target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(NEWSESSION_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  const pairs = [
+    [N5_CREATE_OLD, N5_CREATE_NEW],
+    [N5_ANCHOR_OLD, N5_ANCHOR_NEW],
+    [N5_ST_PROPS_OLD, N5_ST_PROPS_NEW],
+    [N5_WB_PROPS_OLD, N5_WB_PROPS_NEW],
+    [N5_RENDER_OLD, N5_RENDER_NEW],
+    [N5_INJECT_OLD, N5_INJECT_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('ungrouped-new-session: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-ungrouped-new-session.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('createUngroupedSession: async () => {',
+    `// dsh-toolbox ungrouped-new-session\n\t\t\t\tcreateUngroupedSession: async () => {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}
