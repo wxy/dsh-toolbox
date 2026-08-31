@@ -32,9 +32,14 @@ async function main() {
   if (flags.help === true || flags['-h'] === true) {
     console.log(`wxy-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打本地补丁
 
-用法:
-  wxy-harness-patch [--dsh-install <path>]              韧性补丁（坏日志不拖垮界面）
-  wxy-harness-patch --workspace-live [--dsh-install <path>]   实时跨工作区移动会话
+用法（推荐）:
+  wxy-harness-patch                   一条命令应用全部补丁（幂等，升级 Harness 后重跑）
+  wxy-harness-patch --all             同上（显式）
+
+高级（单独重打某一项，一般不需要）:
+  --workspace-live / --workspace-live-v2 / --ungrouped-detach / --blue-bar
+  --new-session-anchor / --ungrouped-anchor / --blank-visible
+  --detach-payload-fix / --move-error-clarity / --workspace-bundle
 
 说明:
   • 幂等：已打过则直接跳过；修改前备份原文件。
