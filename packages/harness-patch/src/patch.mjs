@@ -229,3 +229,118 @@ try {
   await rm(root, { recursive: true, force: true })
 }`
 }
+
+// --- workspace-live patch: real-time cross-workspace session moves ----------
+
+const WORKSPACE_LIVE_MARKER = 'dsh-toolbox workspace-live'
+
+const HOST_OLD = `			async insertSessionBefore(request) {
+				const { payload } = request;
+				const workspace = ctx.workspaceRegistry.get(WorkspaceId(payload.workspaceId));
+				if (workspace === void 0) return workspaceNotFound(request, payload.workspaceId);
+				try {
+					await workspace.insertSessionBefore(payload.sessionId, payload.beforeSessionId);
+				} catch (error) {`
+
+const HOST_NEW = `			async insertSessionBefore(request) {
+				const { payload } = request;
+				const workspace = ctx.workspaceRegistry.get(WorkspaceId(payload.workspaceId));
+				if (workspace === void 0) return workspaceNotFound(request, payload.workspaceId);
+				try {
+					// dsh-toolbox workspace-live: attach an unaccounted session
+					// first when its header cwd matches this workspace, so a
+					// session can be moved across groups in real time. A cwd
+					// mismatch falls through to the not-accounted rejection.
+					try {
+						await workspace.attachSession(payload.sessionId);
+					} catch {
+						// header cwd mismatch or unreadable: leave it unaccounted
+					}
+					await workspace.insertSessionBefore(payload.sessionId, payload.beforeSessionId);
+				} catch (error) {`
+
+const CLIENT_INSERT_OLD = `			};
+			const commitWorkspaceDrag = (activeDrag, over) => {`
+
+const CLIENT_INSERT_NEW = `			};
+			const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).catch((reason) => {
+					console.warn("session move rejected:", reason);
+				});
+			};
+			const commitWorkspaceDrag = (activeDrag, over) => {`
+
+const CLIENT_DROP_OLD = `								onDragOver: workspaceDrag === null || hoverWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									hoverWorkspace(workspaceGroupHalf(e));
+								},
+								onDrop: workspaceDrag === null || dropWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									dropWorkspace(workspaceGroupHalf(e));
+								},`
+
+const CLIENT_DROP_NEW = `								onDragOver: (workspaceDrag === null && drag === null) || hoverWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									hoverWorkspace(workspaceGroupHalf(e));
+								},
+								onDrop: (workspaceDrag === null && drag === null) || dropWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									if (drag !== null && workspaceId !== void 0) {
+										commitSessionToWorkspaceDrag(drag, workspaceId);
+									} else {
+										dropWorkspace(workspaceGroupHalf(e));
+									}
+								},`
+
+/**
+ * Enable real-time cross-workspace session moves on an installed harness:
+ *  - host (dsh-host-apiproxy): workspace.insertSessionBefore now attaches an
+ *    unaccounted session first (header cwd must match the target workspace),
+ *    so moving a session into a workspace works live instead of failing with
+ *    "not accounted";
+ *  - client (dsh-client-ui-workspace): dragging a session (incl. from the
+ *    ungrouped bucket) onto a workspace row now calls insertSessionBefore.
+ * Idempotent; both files backed up; re-apply after harness upgrades.
+ */
+export async function applyWorkspaceLivePatch(dshInstall) {
+  const hostTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  const results = []
+  for (const target of [hostTarget, clientTarget]) {
+    if (!existsSync(target)) throw new Error(`workspace-live target not found: ${target}`)
+  }
+  const hostOriginal = readFileSync(hostTarget, 'utf8')
+  if (!hostOriginal.includes(WORKSPACE_LIVE_MARKER)) {
+    if (!hostOriginal.includes(HOST_OLD)) {
+      throw new Error(`host apiproxy build changed; workspace-live host patch aborted without touching ${hostTarget}`)
+    }
+    const backup = `${hostTarget}.pre-workspace-live.bak`
+    if (!existsSync(backup)) copyFileSync(hostTarget, backup)
+    writeFileSync(hostTarget, hostOriginal.replace(HOST_OLD, HOST_NEW))
+    results.push({ file: hostTarget, backup, changed: true })
+  } else {
+    results.push({ file: hostTarget, alreadyPatched: true })
+  }
+
+  const clientOriginal = readFileSync(clientTarget, 'utf8')
+  if (!clientOriginal.includes(WORKSPACE_LIVE_MARKER)) {
+    if (!clientOriginal.includes(CLIENT_INSERT_OLD) || !clientOriginal.includes(CLIENT_DROP_OLD)) {
+      throw new Error(`client build changed; workspace-live client patch aborted without touching ${clientTarget}`)
+    }
+    const backup = `${clientTarget}.pre-workspace-live.bak`
+    if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+    let next = clientOriginal
+    next = next.replace(CLIENT_INSERT_OLD, CLIENT_INSERT_NEW)
+    next = next.replace(CLIENT_DROP_OLD, CLIENT_DROP_NEW)
+    writeFileSync(clientTarget, next)
+    results.push({ file: clientTarget, backup, changed: true })
+  } else {
+    results.push({ file: clientTarget, alreadyPatched: true })
+  }
+  return results
+}

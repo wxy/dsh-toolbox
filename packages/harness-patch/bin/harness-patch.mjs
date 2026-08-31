@@ -7,7 +7,8 @@
  * Re-run after harness upgrades.
  *
  * Usage:
- *   dsh-harness-patch [--dsh-install <path>]
+ *   dsh-harness-patch [--dsh-install <path>]          resilience patch
+ *   dsh-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
  */
 import { findDshInstall } from '../../core/src/harness.mjs'
 
@@ -29,20 +30,31 @@ function parseArgs(argv) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
   if (flags.help === true || flags['-h'] === true) {
-    console.log(`dsh-harness-patch — 给已安装的 Harness 打"坏日志不拖垮整个界面"的韧性补丁
+    console.log(`dsh-harness-patch — 给已安装的 Harness 打本地补丁
 
 用法:
-  dsh-harness-patch [--dsh-install <path>]
+  dsh-harness-patch [--dsh-install <path>]              韧性补丁（坏日志不拖垮界面）
+  dsh-harness-patch --workspace-live [--dsh-install <path>]   实时跨工作区移动会话
 
 说明:
-  • 幂等：已打过则直接跳过。
-  • 修改前备份原文件为 index.js.pre-resilience.bak。
-  • 每次应用都在全新进程里做行为验证（健康会话 + 损坏会话混合目录），失败自动回滚。
-  • Harness 升级（npm i -g / 重装）后需重跑本命令。`)
+  • 幂等：已打过则直接跳过；修改前备份原文件。
+  • 韧性补丁每次应用都在全新进程里做行为验证，失败自动回滚。
+  • workspace-live：host 侧 insertSessionBefore 自动挂账（header cwd 匹配时），
+    客户端支持把会话（含"未分组"）拖到工作区行实现实时移动。
+  • Harness 升级（npm i -g / 重装）后需重跑对应命令。`)
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch } = await import('../src/patch.mjs')
+  if (flags['workspace-live'] === true) {
+    const results = await applyWorkspaceLivePatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 正在运行的 Harness 内存中仍是旧模块/旧界面，重启后生效；此后跨工作区拖拽即可实时移动会话。')
+    return
+  }
   const result = await applyResiliencePatch(dshInstall)
   if (result.alreadyPatched === true) {
     console.log('补丁已应用过，无需重复。', result.target)

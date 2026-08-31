@@ -7,7 +7,7 @@
 | 包 | 用途 | 命令 |
 |---|---|---|
 | `packages/session-care` | 会话日志健康检查与修复：扫描每个会话日志是否符合 Harness 读端的两条契约（zstd 帧布局 + 序号连续），精确报告损坏原因，并修复可恢复的日志（帧重打包 / 去重段 / 安全截断，原文件保留、修复后先自校验再落盘） | `dsh-session-care health` / `dsh-session-care repair [--apply]` |
-| `packages/harness-patch` | 已安装 Harness 的韧性补丁：会话列表对损坏日志宽容（一个坏日志不再拖垮整个界面/模型列表）。幂等、有备份、应用后行为自校验，升级 Harness 后重跑即可 | `dsh-harness-patch` |
+| `packages/harness-patch` | 已安装 Harness 的本地补丁：① 韧性补丁——会话列表对损坏日志宽容（一个坏日志不再拖垮整个界面/模型列表）；② workspace-live——跨工作区**实时**移动会话（host 侧 `insertSessionBefore` 自动挂账 + 客户端支持把会话拖到工作区行）。幂等、有备份、应用后自校验，升级 Harness 后重跑即可 | `dsh-harness-patch [--workspace-live]` |
 | `packages/workspace-ops` | 会话工作区管理：把"未分组"会话移入工作区、取消归档、查看归属。直接编辑 `workspace.json`（重启后生效） | `dsh-workspace-ops list / move / unarchive` |
 | `packages/core` | 共享底层：zstd 帧编解码（对齐 Harness 读端契约）、已安装 Harness 的探测 | — |
 
@@ -31,9 +31,23 @@ dsh-session-care health                    # 体检所有会话日志
 dsh-session-care repair                    # 看修复计划（dry run）
 dsh-session-care repair --apply            # 真正修复（原文件备份为 .corrupt-<时间戳>）
 dsh-harness-patch                          # 给已安装 Harness 打韧性补丁（升级后重跑）
+dsh-harness-patch --workspace-live         # 实时跨工作区移动（拖拽会话到工作区行）
 dsh-workspace-ops move <sessionId> --workspace appilot
 dsh-workspace-ops unarchive <sessionId>
 ```
+
+## 为什么移动会话到工作区需要重启？能不能实时？
+
+`workspace.json` 由 Harness 在**启动时一次性读入内存**，内存态是权威：所有写操作都经过
+domain 的 write chain 修改内存再整体重写文件；**没有文件热重载**，也**没有"把已有会话挂账
+到工作区"的 RPC**（`attachSession` 只在创建/派生会话时被 host 内部调用）。所以直接编辑
+文件不会被运行中的进程感知，下一次工作区写操作还会用内存态把编辑覆盖掉——这就是要重启的
+原因。
+
+**实时化是可行的**：`harness-patch --workspace-live` 在 host 侧给 `workspace.insertSessionBefore`
+加了"先挂账（header cwd 匹配时）再移动"的逻辑，并在客户端新增"把会话（含未分组）拖到工作区行"
+的落点。客户端补丁由运行中的服务直接按新文件提供（刷新浏览器即生效）；host 侧补丁**重启一次**
+后，拖拽移动就是实时的，之后不再需要任何重启。
 
 ## 发给别人用（插件/分发）
 
