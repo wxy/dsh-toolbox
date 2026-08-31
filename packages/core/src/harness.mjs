@@ -8,7 +8,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const DEFAULT_INSTALL = '/Users/xingyuwang/.nvm/versions/node/v26.7.0/lib/node_modules/@deepseek-ai/dsh'
+/** Generic fallback for machines where `npm root -g` is unavailable. */
+const DEFAULT_INSTALL = process.env.DSH_INSTALL ?? ''
 
 export function findDshInstall(explicit) {
   if (explicit !== undefined && explicit !== '') return explicit
@@ -18,8 +19,8 @@ export function findDshInstall(explicit) {
     const candidate = join(npmRoot, '@deepseek-ai', 'dsh')
     if (existsSync(candidate)) return candidate
   } catch { /* fall through */ }
-  if (existsSync(DEFAULT_INSTALL)) return DEFAULT_INSTALL
-  throw new Error('dsh install not found; pass --dsh-install <path> or set DSH_INSTALL')
+  if (DEFAULT_INSTALL !== '' && existsSync(DEFAULT_INSTALL)) return DEFAULT_INSTALL
+  throw new Error('dsh install not found; run from a machine with dsh installed, or set DSH_INSTALL')
 }
 
 const dshSessionUrl = (dshInstall) => pathToFileURL(
