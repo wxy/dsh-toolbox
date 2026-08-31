@@ -1363,7 +1363,7 @@ const W10_CMD_NEW = `				return ok(request, { archivedSessionIds: [...ctx.worksp
 						details: { sessionId }
 					});
 				}
-				const persistence = ctx.sessionPersistence;
+				const persistence = ctx.get("sessionPersistence");
 				const root = persistence === void 0 ? void 0 : persistence.root;
 				if (root === void 0 || typeof root !== "string") {
 					return err(request, { code: "workspace-move-failed", message: "session persistence is unavailable", details: { sessionId } });
@@ -1909,7 +1909,9 @@ export async function applyArchivedLabelPatch(dshInstall) {
   const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
   if (!existsSync(clientTarget)) throw new Error(`archived-label target not found: ${clientTarget}`)
   const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(ARCHLABEL_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (original.includes(ARCHLABEL_MARKER) || original.includes(W12_LABEL_NEW)) {
+    return [{ file: clientTarget, alreadyPatched: true }]
+  }
   if (!original.includes(W12_LABEL_OLD)) {
     throw new Error('archived-label: the label line no longer matches; aborting without touching the bundle')
   }
@@ -1917,4 +1919,33 @@ export async function applyArchivedLabelPatch(dshInstall) {
   if (!existsSync(backup)) copyFileSync(clientTarget, backup)
   writeFileSync(clientTarget, original.replace(W12_LABEL_OLD, W12_LABEL_NEW))
   return [{ file: clientTarget, backup, changed: true }]
+}
+
+// --- moveSessionToWorkspace persistence fix (v13) ---------------------------
+
+const MOVEPERSIST_MARKER = 'dsh-toolbox move-persistence-fix'
+
+const W13_OLD = `				const persistence = ctx.sessionPersistence;`
+
+const W13_NEW = `				const persistence = ctx.get("sessionPersistence");`
+
+/**
+ * move-persistence-fix (v13): the moveSessionToWorkspace command accessed
+ * ctx.sessionPersistence by property, which cordis blocks ("cannot get
+ * property without inject") because that service is not in the command's
+ * inject list. Session-controller uses ctx.get("sessionPersistence"); do the
+ * same so cross-directory moves actually run.
+ */
+export async function applyMovePersistenceFix(dshInstall) {
+  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
+  if (!existsSync(apiTarget)) throw new Error(`move-persistence-fix target not found: ${apiTarget}`)
+  const original = readFileSync(apiTarget, 'utf8')
+  if (original.includes(MOVEPERSIST_MARKER)) return [{ file: apiTarget, alreadyPatched: true }]
+  if (!original.includes(W13_OLD)) {
+    throw new Error('move-persistence-fix: the persistence access line no longer matches; aborting')
+  }
+  const backup = `${apiTarget}.pre-move-persistence-fix.bak`
+  if (!existsSync(backup)) copyFileSync(apiTarget, backup)
+  writeFileSync(apiTarget, original.replace(W13_OLD, W13_NEW))
+  return [{ file: apiTarget, backup, changed: true }]
 }

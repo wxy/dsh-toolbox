@@ -66,6 +66,7 @@ async function main() {
       ['workspace-bundle host(v10)', () => patch.applyWorkspaceBundleHostPatch(dshInstall)],
       ['workspace-bundle client(v11)', () => patch.applyWorkspaceBundleClientPatch(dshInstall)],
       ['archived-label(v12)', () => patch.applyArchivedLabelPatch(dshInstall)],
+      ['move-persistence-fix(v13)', () => patch.applyMovePersistenceFix(dshInstall)],
     ]
     for (const [label, fn] of steps) {
       try {
