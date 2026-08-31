@@ -2020,3 +2020,31 @@ export async function applyEmptyDropRowPatch(dshInstall) {
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- show placeholder only while dragging over the empty group (v15) --------
+
+const HOVERPLACE_MARKER = 'dsh-toolbox hover-placeholder'
+
+const W15_OLD = `									group.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {`
+
+const W15_NEW = `									group.sessions.length === 0 && sessionDropMarker !== null && sessionDropMarker.id === group.key && (0, react_jsx_runtime.jsx)("div", {`
+
+/**
+ * hover-placeholder (v15): the "（空）拖放到此处" landing row appears only
+ * while a session drag hovers that empty group (instead of being always
+ * visible), so empty workspaces/groups stay clean and the landing point shows
+ * exactly when it can receive a drop.
+ */
+export async function applyHoverPlaceholderPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`hover-placeholder target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(HOVERPLACE_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes(W15_OLD)) {
+    throw new Error('hover-placeholder: the placeholder condition no longer matches; aborting without touching the bundle')
+  }
+  const backup = `${clientTarget}.pre-hover-placeholder.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  writeFileSync(clientTarget, original.replace(W15_OLD, W15_NEW))
+  return [{ file: clientTarget, backup, changed: true }]
+}

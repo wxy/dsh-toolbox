@@ -68,6 +68,7 @@ async function main() {
       ['archived-label(v12)', () => patch.applyArchivedLabelPatch(dshInstall)],
       ['move-persistence-fix(v13)', () => patch.applyMovePersistenceFix(dshInstall)],
       ['empty-drop-row(v14)', () => patch.applyEmptyDropRowPatch(dshInstall)],
+      ['hover-placeholder(v15)', () => patch.applyHoverPlaceholderPatch(dshInstall)],
     ]
     for (const [label, fn] of steps) {
       try {
