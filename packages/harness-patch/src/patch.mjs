@@ -701,3 +701,200 @@ export async function applyUngroupedDetachPatch(dshInstall) {
   }
   return results
 }
+
+// --- blue-bar cross-group drag (v4): insertion bar, not highlight -----------
+
+const BLUEBAR_MARKER = 'dsh-toolbox blue-bar-drag'
+
+const B4_HOVER_OLD = `												hover: (half) => {
+													/* v8 ignore next -- narrowing guard: Rows gates hover on \`active\`, which is false while the drag state is null. */
+													setDrag((d) => d === null ? d : {
+														...d,
+														over: {
+															id: node.id,
+															half
+														}
+													});
+												},`
+
+const B4_HOVER_NEW = `												hover: (half) => {
+													setDrag((d) => d === null ? d : {
+														...d,
+														over: {
+															id: node.id,
+															half,
+															accountKey: group.key
+														}
+													});
+												},`
+
+const B4_MARKER_OLD = `												marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,`
+
+const B4_MARKER_NEW = `												marker: drag !== null && drag.over?.id === node.id ? drag.over.half : null,`
+
+const B4_DROP_OLD = `												drop: (half) => {
+													/* v8 ignore next -- narrowing guard: Rows gates drop on \`active\`, which is false while the drag state is null. */
+													if (drag === null) return;
+													commitSessionDrag(drag, {
+														id: node.id,
+														half
+													});
+												},`
+
+const B4_DROP_NEW = `												drop: (half) => {
+													if (drag === null) return;
+													if (drag.accountKey === group.key) commitSessionDrag(drag, {
+														id: node.id,
+														half
+													});
+													else commitSessionCrossGroupDrag(drag, {
+														id: node.id,
+														half,
+														accountKey: group.key
+													});
+												},`
+
+const B4_END_OLD = `												end: () => {
+													if (drag?.over !== null && drag?.over !== void 0) commitSessionDrag(drag, drag.over);
+													else setDrag(null);
+													setSessionDropMarker(null);
+													sessionDropCommitted.current = false;
+												}`
+
+const B4_END_NEW = `												end: () => {
+													if (drag?.over !== null && drag?.over !== void 0 && drag.over.accountKey === drag.accountKey) commitSessionDrag(drag, drag.over);
+													else if (drag?.over !== null && drag?.over !== void 0) commitSessionCrossGroupDrag(drag, drag.over);
+													else setDrag(null);
+													setSessionDropMarker(null);
+													sessionDropCommitted.current = false;
+												}`
+
+const B4_ROWGATE_OLD = `					onDragOver: drag === void 0 ? void 0 : (e) => {
+						if (!drag.active) return;
+						e.preventDefault();
+						e.dataTransfer.dropEffect = "move";
+						drag.hover(rowHalf(e));
+					},
+					onDrop: drag === void 0 ? void 0 : (e) => {
+						if (!drag.active) return;
+						e.preventDefault();
+						drag.drop(rowHalf(e));
+					},`
+
+const B4_ROWGATE_NEW = `					onDragOver: drag === void 0 ? void 0 : (e) => {
+						e.preventDefault();
+						e.dataTransfer.dropEffect = "move";
+						drag.hover(rowHalf(e));
+					},
+					onDrop: drag === void 0 ? void 0 : (e) => {
+						e.preventDefault();
+						drag.drop(rowHalf(e));
+					},`
+
+const B4_UNGROUPED_FN_OLD = `				detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const B4_UNGROUPED_FN_NEW = `				detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};
+			const commitSessionCrossGroupDrag = (activeDrag, over) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const targetKey = over.accountKey;
+				if (targetKey === "") {
+					const owner = workspaces.find((workspace) => workspace.sessionIds.includes(activeDrag.sessionId));
+					if (owner === void 0) return;
+					detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+						console.warn("session detach rejected:", reason);
+						try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+					});
+					return;
+				}
+				const targetWorkspace = workspaces.find((workspace) => workspace.workspaceId === targetKey);
+				const ids = targetWorkspace?.sessionIds ?? [];
+				const targetIndex = ids.indexOf(over.id);
+				const anchor = over.half === "before" ? over.id : (targetIndex >= 0 ? ids[targetIndex + 1] : void 0);
+				insertSessionBefore(targetKey, activeDrag.sessionId, anchor).then(() => {
+					setGroupExpanded(targetKey, true);
+				}).catch((reason) => {
+					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const B4_GROUPOVER_OLD = `								onDragOver: drag !== null || (workspaceDrag !== null && workspaceId !== void 0) ? (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									if (drag !== null) {
+										setSessionDropMarker({ id: group.key, half: "after" });
+									} else {
+										hoverWorkspace(workspaceGroupHalf(e));
+									}
+								} : void 0,`
+
+const B4_GROUPOVER_NEW = `								onDragOver: drag !== null || (workspaceDrag !== null && workspaceId !== void 0) ? (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									if (drag !== null) {
+										setSessionDropMarker({ id: group.key, half: workspaceGroupHalf(e) });
+									} else {
+										hoverWorkspace(workspaceGroupHalf(e));
+									}
+								} : void 0,`
+
+const B4_CLASS_OLD = `sessionDropMarker !== null && sessionDropMarker.id === group.key && (sessionDropMarker.half === "before" ? WorkspaceBrowser_module_css_default.workspaceDropBefore : WorkspaceBrowser_module_css_default.workspaceDropAfter)),`
+
+const B4_CLASS_NEW = `sessionDropMarker !== null && sessionDropMarker.id === group.key && (sessionDropMarker.half === "before" ? Rows_module_css_default.dropBefore : Rows_module_css_default.dropAfter)),`
+
+/**
+ * blue-bar cross-group drag (v4): replace the group highlight with the same
+ * blue insertion bar used for same-group reordering, extended across groups.
+ *  - hovering any session row in ANY group while dragging shows the bar at
+ *    the exact insertion point (before/after that row)
+ *  - dropping inserts at that anchor via insertSessionBefore (workspace
+ *    target, auto-attach) or detaches (ungrouped target)
+ *  - header drops use the bar too (before/after the group header row)
+ * Requires v1+v2+v3.
+ */
+export async function applyBlueBarDragPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`blue-bar target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(BLUEBAR_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes('const commitSessionCrossGroupDrag')) {
+    // v3 must be present (it adds commitSessionToUngroupedDrag's detach block)
+    if (!original.includes('detachSession(owner.workspaceId, activeDrag.sessionId)')) {
+      throw new Error('blue-bar: ungrouped-detach (v3) is not applied; run --ungrouped-detach first')
+    }
+  }
+  const pairs = [
+    [B4_HOVER_OLD, B4_HOVER_NEW],
+    [B4_MARKER_OLD, B4_MARKER_NEW],
+    [B4_DROP_OLD, B4_DROP_NEW],
+    [B4_END_OLD, B4_END_NEW],
+    [B4_ROWGATE_OLD, B4_ROWGATE_NEW],
+    [B4_UNGROUPED_FN_OLD, B4_UNGROUPED_FN_NEW],
+    [B4_GROUPOVER_OLD, B4_GROUPOVER_NEW],
+    [B4_CLASS_OLD, B4_CLASS_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('blue-bar: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-blue-bar.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('const commitSessionCrossGroupDrag = (activeDrag, over) => {',
+    `// dsh-toolbox blue-bar-drag\n\t\t\tconst commitSessionCrossGroupDrag = (activeDrag, over) => {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}
