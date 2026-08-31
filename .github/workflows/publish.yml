@@ -20,10 +20,12 @@ jobs:
       id-token: write   # npm 用 OIDC 身份令牌换取临时发布令牌（Trusted Publishing 必需）
     steps:
       - uses: actions/checkout@v4
+      # 注意：不要给 setup-node 传 registry-url——它会注入占位 NODE_AUTH_TOKEN
+      # （XXXXX-...），npm publish 会用这个假 token 请求注册表而拿到 404，
+      # 永远不触发 OIDC 信任发布交换。去掉后 npm 走默认注册表并自动做 OIDC。
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org/
       # 发布顺序：core 先发（session-care / harness-patch 依赖它）
       - name: Publish @dsh-toolbox/core
         working-directory: packages/core
