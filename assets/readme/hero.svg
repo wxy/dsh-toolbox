@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="heroTitle heroDesc">
+  <title id="heroTitle">dsh-toolbox — 会话日志修复与会话区管理</title>
+  <desc id="heroDesc">浅色 hero：左侧产品名与中英双语标语，右侧会话日志修复 + 会话区拖拽整理的矢量插画。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F4EA"/>
+      <stop offset="1" stop-color="#F1EBDD"/>
+    </linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#2B2620" stroke-opacity="0.045"/>
+    </pattern>
+    <radialGradient id="warmGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F0C75F" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#F0C75F" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#F0C75F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pathGrad" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#C77B2E"/>
+      <stop offset="0.5" stop-color="#E8A24B"/>
+      <stop offset="0.85" stop-color="#F0C75F"/>
+      <stop offset="1" stop-color="#F6D98A"/>
+    </linearGradient>
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="480" fill="url(#bg)"/>
+  <rect width="1280" height="480" fill="url(#grid)"/>
+  <circle cx="830" cy="250" r="280" fill="url(#warmGlow)"/>
+  <line x1="512" y1="44" x2="512" y2="438" stroke="#2B2620" stroke-opacity="0.10"/>
+
+  <!-- ── 右侧插画：会话日志修复（盾牌+对勾 与 日志行） + 会话区拖拽（两个文件夹 + 拖拽箭头） ── -->
+
+  <!-- 日志行堆叠 -->
+  <g>
+    <rect x="626" y="316" width="150" height="26" rx="13" fill="#FFF9E8" stroke="#2B2620" stroke-width="3.5"/>
+    <rect x="648" y="352" width="150" height="26" rx="13" fill="#F6C85F" stroke="#2B2620" stroke-width="3.5"/>
+    <rect x="672" y="388" width="124" height="26" rx="13" fill="#E8A24B" stroke="#2B2620" stroke-width="3.5" opacity="0.9"/>
+    <circle cx="706" cy="394" r="4" fill="#FFF9E8"/>
+    <line x1="726" y1="390" x2="768" y2="390" stroke="#2B2620" stroke-width="3" stroke-linecap="round"/>
+    <line x1="726" y1="398" x2="756" y2="398" stroke="#2B2620" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- 盾牌 + 对勾（修复 / 韧性） -->
+  <g>
+    <path d="M 842 212 C 842 236 856 258 884 266 C 912 258 926 236 926 212 L 926 206 C 898 198 876 196 858 192 C 856 198 842 204 842 212 Z" fill="#FFF9E8" stroke="#2B2620" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M 868 228 L 878 238 L 900 214" fill="none" stroke="#C77B2E" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- 拖拽路径（虚线弧线 + 箭头）：文件夹 B → 文件夹 A -->
+  <path d="M 1042 360 C 1086 360 1106 322 1108 288" fill="none" stroke="#D98E2B" stroke-width="6" stroke-linecap="round" stroke-dasharray="2 14" opacity="0.8"/>
+  <path d="M 1100 286 L 1112 284 L 1106 296 Z" fill="#D98E2B"/>
+
+  <!-- 文件夹 A（目标） -->
+  <g>
+    <rect x="1000" y="330" width="40" height="12" rx="5" fill="#E8A24B" stroke="#2B2620" stroke-width="3"/>
+    <rect x="992" y="340" width="148" height="84" rx="14" fill="#FFF9E8" stroke="#2B2620" stroke-width="4"/>
+    <line x1="1012" y1="366" x2="1120" y2="366" stroke="#2B2620" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+    <line x1="1012" y1="386" x2="1092" y2="386" stroke="#2B2620" stroke-width="4" stroke-linecap="round" opacity="0.3"/>
+  </g>
+
+  <!-- 文件夹 B（源） -->
+  <g>
+    <rect x="1140" y="218" width="36" height="11" rx="5" fill="#F0C75F" stroke="#2B2620" stroke-width="3"/>
+    <rect x="1133" y="228" width="122" height="70" rx="12" fill="#F6C85F" stroke="#2B2620" stroke-width="4"/>
+    <circle cx="1153" cy="262" r="7" fill="#FFF9E8" stroke="#2B2620" stroke-width="3"/>
+    <line x1="1172" y1="262" x2="1236" y2="262" stroke="#2B2620" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+  </g>
+
+  <!-- 星芒 -->
+  <g fill="#E8954C">
+    <path d="M 972 138 L 974.4 146 L 982 148.4 L 974.4 150.8 L 972 158.4 L 969.6 150.8 L 962 148.4 L 969.6 146 Z"/>
+    <path d="M 1178 176 L 1180.4 184 L 1188 186.4 L 1180.4 188.8 L 1178 196.4 L 1175.6 188.8 L 1168 186.4 L 1175.6 184 Z"/>
+    <path d="M 700 224 L 701.8 230 L 708 231.8 L 701.8 233.6 L 700 240 L 698.2 233.6 L 692 231.8 L 698.2 230 Z"/>
+    <path d="M 1204 396 L 1206.4 404 L 1214 406.4 L 1206.4 408.8 L 1204 416.4 L 1201.6 408.8 L 1194 406.4 L 1201.6 404 Z"/>
+  </g>
+
+  <!-- ── 左侧文字 ── -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+    <text x="54" y="58" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13.5" font-weight="700" letter-spacing="2" fill="#A97A3B">DEEPSEEK HARNESS TOOLBOX</text>
+    <text x="52" y="122" font-size="72" font-weight="850" letter-spacing="-1.5" fill="#2B2620">dsh-toolbox</text>
+    <rect x="54" y="134" width="230" height="11" rx="5.5" fill="#F0C75F" opacity="0.9"/>
+    <text x="56" y="178" font-size="30" font-weight="700" fill="#B26B24">会话日志修复与会话区管理</text>
+    <text x="56" y="210" font-size="24" font-weight="700" fill="#B26B24">Session Log Repair &amp;</text>
+    <text x="56" y="240" font-size="24" font-weight="700" fill="#B26B24">Session-Area Management</text>
+    <text x="56" y="274" font-size="18" font-weight="520" fill="#6B6255">离线修复损坏日志 · 界面拖拽整理会话</text>
+    <text x="56" y="300" font-size="17" fill="#6B6255">Repair corrupt logs offline · drag-organize in the UI</text>
+    <text x="56" y="328" font-size="14.5" fill="#8A8070">两个命令行组件 · npm 一键安装</text>
+    <text x="56" y="348" font-size="14.5" fill="#8A8070">Two CLI packages · install via npm</text>
+  </g>
+
+  <!-- 流程：CHECK → REPAIR → ORGANIZE -->
+  <g font-family="ui-monospace, 'SF Mono', Menlo, monospace">
+    <circle cx="64" cy="398" r="9" fill="#E8954C" stroke="#2B2620" stroke-width="3"/>
+    <text x="82" y="403" font-size="13" font-weight="700" letter-spacing="1.5" fill="#7A6F5F">CHECK</text>
+    <line x1="140" y1="398" x2="172" y2="398" stroke="#2B2620" stroke-width="2"/>
+    <path d="M170 392 L178 398 L170 404 Z" fill="#2B2620"/>
+    <circle cx="190" cy="398" r="9" fill="#E8A24B" stroke="#2B2620" stroke-width="3"/>
+    <text x="208" y="403" font-size="13" font-weight="700" letter-spacing="1.5" fill="#7A6F5F">REPAIR</text>
+    <line x1="272" y1="398" x2="304" y2="398" stroke="#2B2620" stroke-width="2"/>
+    <path d="M302 392 L310 398 L302 404 Z" fill="#2B2620"/>
+    <circle cx="322" cy="398" r="9" fill="#F6C85F" stroke="#2B2620" stroke-width="3"/>
+    <text x="340" y="403" font-size="13" font-weight="700" letter-spacing="1.5" fill="#7A6F5F">ORGANIZE</text>
+  </g>
+</svg>

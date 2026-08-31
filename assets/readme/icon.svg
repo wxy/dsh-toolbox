@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="iconTitle iconDesc">
+  <title id="iconTitle">dsh-toolbox — 会话日志修复与会话区管理</title>
+  <desc id="iconDesc">浅色方形图标：马镫（Harness 语义）+ 环内对勾（修复 / 健康）+ 星芒；圆角 + 贴边描边。</desc>
+  <defs>
+    <pattern id="ig" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#2B2620" stroke-opacity="0.045"/>
+    </pattern>
+    <radialGradient id="iglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F0C75F" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="#F0C75F" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#F0C75F" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="iclip"><rect width="1024" height="1024" rx="225"/></clipPath>
+  </defs>
+
+  <!-- 圆角背景（rx 225 ≈ 22%）+ 贴边描边（描边中心落在画布边缘，外半被裁） -->
+  <rect width="1024" height="1024" rx="225" fill="#F6F2E8" stroke="#E8954C" stroke-width="48"/>
+  <g clip-path="url(#iclip)">
+    <rect width="1024" height="1024" fill="url(#ig)"/>
+    <circle cx="512" cy="470" r="400" fill="url(#iglow)"/>
+
+    <!-- 顶部皮条挂环（马鞍连接处） -->
+    <circle cx="512" cy="250" r="34" fill="none" stroke="#2B2620" stroke-width="16"/>
+    <rect x="492" y="278" width="40" height="34" rx="10" fill="#E8A24B" stroke="#2B2620" stroke-width="12"/>
+
+    <!-- 马镫主体（倒泪滴形环 + 底部平踏） -->
+    <path d="M 512 300
+             C 512 344 466 352 438 424
+             C 410 496 376 548 372 596
+             C 370 630 394 654 436 654
+             L 588 654
+             C 630 654 654 630 652 596
+             C 648 548 614 496 586 424
+             C 558 352 512 344 512 300 Z"
+          fill="#F0C75F" stroke="#2B2620" stroke-width="16" stroke-linejoin="round"/>
+
+    <!-- 环内对勾（修复 / 健康） -->
+    <path d="M 448 516 L 506 574 L 596 440" fill="none" stroke="#2B2620" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 星芒 -->
+    <g fill="#E8954C">
+      <path d="M 880 180 L 884 198 L 902 202 L 884 206 L 880 224 L 876 206 L 858 202 L 876 198 Z"/>
+      <path d="M 918 668 L 920.5 680 L 932.5 682.5 L 920.5 685 L 918 697 L 915.5 685 L 903.5 682.5 L 915.5 680 Z"/>
+      <path d="M 150 880 L 152 890 L 162 892 L 152 894 L 150 904 L 148 894 L 138 892 L 148 890 Z"/>
+    </g>
+  </g>
+</svg>

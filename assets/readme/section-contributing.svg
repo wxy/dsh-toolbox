@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="138" viewBox="0 0 1200 138" role="img" aria-label="Contributing · 参与贡献">
+  <defs>
+    <pattern id="g" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#2B2620" stroke-opacity="0.045"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="138" rx="20" fill="#F6F2E8"/>
+  <rect width="1200" height="138" rx="20" fill="url(#g)"/>
+
+  <text x="54" y="38" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="15" font-weight="700" letter-spacing="3" fill="#A97A3B">CONTRIBUTING</text>
+  <rect x="54" y="52" width="54" height="5" rx="2.5" fill="#E8954C"/>
+  <text x="54" y="104" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="40" font-weight="800" fill="#2B2620">Contributing · 参与贡献</text>
+
+  <circle cx="1060" cy="62" r="32" fill="#E8954C" opacity="0.12"/>
+  <g>
+    <rect x="1018" y="44" width="58" height="13" rx="6.5" fill="#FFF9E8" stroke="#2B2620" stroke-width="2.5"/>
+    <rect x="1026" y="62" width="58" height="13" rx="6.5" fill="#F6C85F" stroke="#2B2620" stroke-width="2.5"/>
+    <line x1="1034" y1="68.5" x2="1068" y2="68.5" stroke="#2B2620" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+  </g>
+  <g>
+    <path d="M 1092 42 C 1092 54 1099 62 1114 66 C 1129 62 1136 54 1136 42 L 1136 40 C 1122 36 1108 35 1098 33 C 1094 36 1092 39 1092 42 Z" fill="#F0C75F" stroke="#2B2620" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M 1104 49 L 1111 56 L 1126 40" fill="none" stroke="#2B2620" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="M 1030 96 C 1052 96 1054 92 1072 92" fill="none" stroke="#D98E2B" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="2 7"/>
+  <path d="M 1068 86 L 1076 92 L 1068 98 Z" fill="#D98E2B"/>
+  <g>
+    <rect x="1078" y="86" width="18" height="6" rx="3" fill="#E8A24B" stroke="#2B2620" stroke-width="2"/>
+    <rect x="1072" y="90" width="60" height="34" rx="8" fill="#FFF9E8" stroke="#2B2620" stroke-width="2.5"/>
+    <line x1="1080" y1="102" x2="1124" y2="102" stroke="#2B2620" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/>
+    <line x1="1080" y1="113" x2="1112" y2="113" stroke="#2B2620" stroke-width="2.5" stroke-linecap="round" opacity="0.25"/>
+  </g>
+  <path d="M 1152 46 L 1153.6 51.4 L 1159 53 L 1153.6 54.6 L 1152 60 L 1150.4 54.6 L 1145 53 L 1150.4 51.4 Z" fill="#E8954C"/>
+</svg>
