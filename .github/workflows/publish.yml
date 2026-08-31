@@ -1,12 +1,14 @@
 name: publish to npm
 
-# 触发：推送任意 v* 标签（例如 git tag v0.1.0 && git push --tags）
+# 触发：推送任意 v* 标签（例如 git tag v0.1.1 && git push --tags）
 #
-# 采用 npm Trusted Publishing（OIDC）：
-#   - 不需要 NPM_TOKEN secret，也不需要在 GitHub 配任何 secret；
-#   - 前提：npmjs.com 上为 @dsh-toolbox 组织（或每个包）启用 Trusted Publishing，
-#     并把发布者指向本仓库，subject 类似 repo:wxy/dsh-toolbox:ref:refs/tags/v*；
-#   - 本地手动发布仍用 npm login（Trusted Publishing 只用于 CI/CD）。
+# 采用 npm Trusted Publishing（OIDC）：不需要 NPM_TOKEN secret。
+# npm CLI 的自动 OIDC 检测在部分情况下不生效（会静默退回、报 ENEEDAUTH），
+# 所以这里手动执行 npm 内部同一套 OIDC 交换：
+#   1) 从 GitHub 取 ID token（audience = npm:registry.npmjs.org）
+#   2) 在 npm 注册中心按包交换成短时发布 token
+#   3) 写入 .npmrc 后 npm publish
+# 失败时错误原样暴露（不吞掉），便于排查。
 on:
   push:
     tags:
@@ -17,22 +19,36 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # npm 用 OIDC 身份令牌换取临时发布令牌（Trusted Publishing 必需）
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      # 注意：不要给 setup-node 传 registry-url——它会注入占位 NODE_AUTH_TOKEN
-      # （XXXXX-...），npm publish 会用这个假 token 请求注册表而拿到 404，
-      # 永远不触发 OIDC 信任发布交换。去掉后 npm 走默认注册表并自动做 OIDC。
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # 发布顺序：core 先发（session-care / harness-patch 依赖它）
       - name: Publish @dsh-toolbox/core
         working-directory: packages/core
-        run: npm publish --access public
+        run: |
+          set -euo pipefail
+          echo "OIDC URL set: $([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo yes || echo no)"
+          ID_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          test -n "$ID_TOKEN" -a "$ID_TOKEN" != "null" || { echo "ID token fetch failed"; exit 1; }
+          REG_TOKEN=$(curl -sS -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@dsh-toolbox%2fcore" -H "Authorization: Bearer $ID_TOKEN" | jq -r .token)
+          test -n "$REG_TOKEN" -a "$REG_TOKEN" != "null" || { echo "OIDC exchange failed"; exit 1; }
+          npm config set //registry.npmjs.org/:_authToken="$REG_TOKEN"
+          npm publish --access public
       - name: Publish @dsh-toolbox/session-care
         working-directory: packages/session-care
-        run: npm publish --access public
+        run: |
+          set -euo pipefail
+          ID_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          REG_TOKEN=$(curl -sS -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@dsh-toolbox%2fsession-care" -H "Authorization: Bearer $ID_TOKEN" | jq -r .token)
+          npm config set //registry.npmjs.org/:_authToken="$REG_TOKEN"
+          npm publish --access public
       - name: Publish @dsh-toolbox/harness-patch
         working-directory: packages/harness-patch
-        run: npm publish --access public
+        run: |
+          set -euo pipefail
+          ID_TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          REG_TOKEN=$(curl -sS -X POST "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@dsh-toolbox%2fharness-patch" -H "Authorization: Bearer $ID_TOKEN" | jq -r .token)
+          npm config set //registry.npmjs.org/:_authToken="$REG_TOKEN"
+          npm publish --access public
