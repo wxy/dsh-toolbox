@@ -45,7 +45,7 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2 } = await import('../src/patch.mjs')
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -53,6 +53,15 @@ async function main() {
       else console.log('已应用:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: 正在运行的 Harness 内存中仍是旧模块/旧界面，重启后生效；此后跨工作区拖拽即可实时移动会话。')
+    return
+  }
+  if (flags['workspace-live-v2'] === true) {
+    const results = await applyWorkspaceLivePatchV2(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用 v2:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: v2 需要先应用 v1；刷新浏览器即可看到高亮与实时更新（无需重启）。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)

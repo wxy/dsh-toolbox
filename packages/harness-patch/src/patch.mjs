@@ -344,3 +344,140 @@ export async function applyWorkspaceLivePatch(dshInstall) {
   }
   return results
 }
+
+// --- workspace-live v2: drop feedback + live list update --------------------
+
+const WORKSPACE_LIVE_V2_MARKER = 'dsh-toolbox workspace-live-v2'
+
+const V2_STATE_OLD = `			const [drag, setDrag] = (0, react.useState)(null);
+			const sessionDropCommitted = (0, react.useRef)(false);`
+
+const V2_STATE_NEW = `			const [drag, setDrag] = (0, react.useState)(null);
+			const sessionDropCommitted = (0, react.useRef)(false);
+			const [sessionDropMarker, setSessionDropMarker] = (0, react.useState)(null);`
+
+const V2_COMMIT_OLD = `			const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).catch((reason) => {
+					console.warn("session move rejected:", reason);
+				});
+			};`
+
+const V2_COMMIT_NEW = `			const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).then(() => {
+					setGroupExpanded(workspaceId, true);
+				}).catch((reason) => {
+					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const V2_CLASS_OLD = `							return (0, react_jsx_runtime.jsxs)("div", {
+								className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter),`
+
+const V2_CLASS_NEW = `							return (0, react_jsx_runtime.jsxs)("div", {
+								className: clsx(WorkspaceBrowser_module_css_default.groupSection, workspaceMarker === "before" && WorkspaceBrowser_module_css_default.workspaceDropBefore, workspaceMarker === "after" && WorkspaceBrowser_module_css_default.workspaceDropAfter, sessionDropMarker !== null && sessionDropMarker.id === workspaceId && (sessionDropMarker.half === "before" ? WorkspaceBrowser_module_css_default.workspaceDropBefore : WorkspaceBrowser_module_css_default.workspaceDropAfter)),`
+
+const V2_DRAGOVER_OLD = `								onDragOver: (workspaceDrag === null && drag === null) || hoverWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									hoverWorkspace(workspaceGroupHalf(e));
+								},`
+
+const V2_DRAGOVER_NEW = `								onDragOver: (workspaceDrag === null && drag === null) || hoverWorkspace === void 0 ? void 0 : (e) => {
+									e.preventDefault();
+									e.dataTransfer.dropEffect = "move";
+									if (drag !== null && workspaceId !== void 0) {
+										setSessionDropMarker({ id: workspaceId, half: workspaceGroupHalf(e) });
+									} else {
+										hoverWorkspace(workspaceGroupHalf(e));
+									}
+								},`
+
+const V2_DRAGSTART_OLD = `												start: () => {
+													sessionDropCommitted.current = false;
+													setDrag({
+														accountKey: group.key,
+														sessionId: node.id,
+														over: null
+													});
+												},`
+
+const V2_DRAGSTART_NEW = `												start: () => {
+													sessionDropCommitted.current = false;
+													setSessionDropMarker(null);
+													setDrag({
+														accountKey: group.key,
+														sessionId: node.id,
+														over: null
+													});
+												},`
+
+const V2_DRAGEND_OLD = `												end: () => {
+													if (drag?.over !== null && drag?.over !== void 0) commitSessionDrag(drag, drag.over);
+													else setDrag(null);
+													sessionDropCommitted.current = false;
+												}`
+
+const V2_DRAGEND_NEW = `												end: () => {
+													if (drag?.over !== null && drag?.over !== void 0) commitSessionDrag(drag, drag.over);
+													else setDrag(null);
+													setSessionDropMarker(null);
+													sessionDropCommitted.current = false;
+												}`
+
+const V2_REFRESH_OLD = `				insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
+					await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId);
+				},`
+
+const V2_REFRESH_NEW = `				insertSessionBefore: async (workspaceId, sessionId, beforeSessionId) => {
+					await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+/**
+ * workspace-live v2: drop feedback + live sidebar update. Requires the v1
+ * patch. Adds: a drop-highlight on the target workspace row while a session
+ * drag hovers it, target-group expansion + a forced workspace-list refresh
+ * after a successful move (so the result is visible immediately, no page
+ * refresh), a visible alert on failure, and marker cleanup on drag start/end.
+ */
+export async function applyWorkspaceLivePatchV2(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`workspace-live v2 target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(WORKSPACE_LIVE_V2_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes('const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {')) {
+    throw new Error('workspace-live v1 is not applied; run --workspace-live first')
+  }
+  const pairs = [
+    [V2_STATE_OLD, V2_STATE_NEW],
+    [V2_COMMIT_OLD, V2_COMMIT_NEW],
+    [V2_CLASS_OLD, V2_CLASS_NEW],
+    [V2_DRAGOVER_OLD, V2_DRAGOVER_NEW],
+    [V2_DRAGSTART_OLD, V2_DRAGSTART_NEW],
+    [V2_DRAGEND_OLD, V2_DRAGEND_NEW],
+    [V2_REFRESH_OLD, V2_REFRESH_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('workspace-live v2: a v1 text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-workspace-live-v2.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  // marker: annotate the v2 commit function so idempotence is content-based
+  writeFileSync(clientTarget, next.replace(
+    'const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {',
+    `// dsh-toolbox workspace-live-v2\n\t\t\tconst commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {`,
+  ))
+  return [{ file: clientTarget, backup, changed: true }]
+}
