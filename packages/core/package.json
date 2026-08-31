@@ -6,7 +6,8 @@
   "license": "MIT",
   "private": false,
   "files": [
-    "src"
+    "src",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
