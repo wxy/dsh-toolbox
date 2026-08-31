@@ -65,6 +65,7 @@ async function main() {
       ['move-error-clarity(v9)', () => patch.applyMoveErrorClarityPatch(dshInstall)],
       ['workspace-bundle host(v10)', () => patch.applyWorkspaceBundleHostPatch(dshInstall)],
       ['workspace-bundle client(v11)', () => patch.applyWorkspaceBundleClientPatch(dshInstall)],
+      ['archived-label(v12)', () => patch.applyArchivedLabelPatch(dshInstall)],
     ]
     for (const [label, fn] of steps) {
       try {

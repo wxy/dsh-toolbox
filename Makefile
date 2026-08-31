@@ -3,8 +3,7 @@ PREFIX ?= $(HOME)/.dsh/tools/bin
 
 BINS = \
   packages/session-care/bin/wxy-session-care.mjs \
-  packages/harness-patch/bin/wxy-harness-patch.mjs \
-  packages/workspace-ops/bin/wxy-workspace-ops.mjs
+  packages/harness-patch/bin/wxy-harness-patch.mjs
 
 install:
 	mkdir -p $(PREFIX)

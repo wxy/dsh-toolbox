@@ -1890,3 +1890,31 @@ export async function applyWorkspaceBundleClientPatch(dshInstall) {
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- archived folder label fix (v12): it showed as "未分组" ----------------
+
+const ARCHLABEL_MARKER = 'dsh-toolbox archived-label'
+
+const W12_LABEL_OLD = `			const label = row.workspaceId === void 0 ? t("group.ungrouped") : row.label;`
+
+const W12_LABEL_NEW = `			const label = row.workspaceId === void 0 ? (row.key === "archived" ? "归档" : t("group.ungrouped")) : row.label;`
+
+/**
+ * archived-label (v12): ProjectRowItem rendered every group without a
+ * workspaceId as "未分组" — including the archived folder added by the
+ * workspace-bundle patch, producing two "未分组" sections. The archived
+ * folder now shows "归档".
+ */
+export async function applyArchivedLabelPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`archived-label target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(ARCHLABEL_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes(W12_LABEL_OLD)) {
+    throw new Error('archived-label: the label line no longer matches; aborting without touching the bundle')
+  }
+  const backup = `${clientTarget}.pre-archived-label.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  writeFileSync(clientTarget, original.replace(W12_LABEL_OLD, W12_LABEL_NEW))
+  return [{ file: clientTarget, backup, changed: true }]
+}
