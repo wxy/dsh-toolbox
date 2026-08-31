@@ -3,8 +3,8 @@
  * enforces (physical frame layout + contiguous event sequence numbers) and
  * report the exact failure, without throwing the caller's world down.
  */
-import { assertHeaderFrame, decompressFrame, framesToPlaintext, scanFrames } from '../../core/src/frames.mjs'
-import { decodeStorageRecord } from '../../core/src/harness.mjs'
+import { assertHeaderFrame, decompressFrame, framesToPlaintext, scanFrames } from '@dsh-toolbox/core/src/frames.mjs'
+import { decodeStorageRecord } from '@dsh-toolbox/core/src/harness.mjs'
 
 /** Walk event lines after the header, tracking seq contiguity. */
 export async function walkSeqs(dshInstall, plaintext) {

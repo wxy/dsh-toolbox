@@ -6,7 +6,8 @@ BINS = \
   packages/harness-patch/bin/wxy-harness-patch.mjs
 
 install:
-	mkdir -p $(PREFIX)
+	mkdir -p $(PREFIX) node_modules/@dsh-toolbox
+	@if [ ! -e node_modules/@dsh-toolbox/core ]; then ln -sfn ../../packages/core node_modules/@dsh-toolbox/core; echo "linked node_modules/@dsh-toolbox/core"; fi
 	@for b in $(BINS); do \
 	  name=$$(basename $${b%.mjs}); \
 	  ln -sf $(CURDIR)/$$b $(PREFIX)/$$name; \

@@ -13,7 +13,7 @@
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { findDshInstall } from '../../core/src/harness.mjs'
+import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
 const HELP = `wxy-session-care — DeepSeek Harness 工具集（dsh-toolbox）· 会话日志健康检查与修复
 

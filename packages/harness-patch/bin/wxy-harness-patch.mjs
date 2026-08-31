@@ -10,7 +10,7 @@
  *   wxy-harness-patch [--dsh-install <path>]          resilience patch
  *   wxy-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
  */
-import { findDshInstall } from '../../core/src/harness.mjs'
+import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
 function parseArgs(argv) {
   const flags = {}

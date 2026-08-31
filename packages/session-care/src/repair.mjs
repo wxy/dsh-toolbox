@@ -13,7 +13,7 @@
  * re-verified with the reader's own checks before publishing.
  */
 import { randomBytes } from 'node:crypto'
-import { compressFrame } from '../../core/src/frames.mjs'
+import { compressFrame } from '@dsh-toolbox/core/src/frames.mjs'
 import { scanRoot, validateLog, walkSeqs } from './validate.mjs'
 
 /** Decide the minimal safe content fix for a corrupt plaintext. */
@@ -75,7 +75,7 @@ export async function planContentFix(dshInstall, plaintext) {
 }
 
 async function decodeRows(dshInstall, line) {
-  const { decodeStorageRecord } = await import('../../core/src/harness.mjs')
+  const { decodeStorageRecord } = await import('@dsh-toolbox/core/src/harness.mjs')
   return decodeStorageRecord(dshInstall, JSON.parse(line))
 }
 

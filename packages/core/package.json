@@ -1,6 +1,6 @@
 {
   "name": "@dsh-toolbox/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared low-level pieces for the dsh-toolbox plugins: zstd frame codec matching the harness reader contract, and installed-harness discovery.",
   "type": "module",
   "license": "MIT",
@@ -18,5 +18,9 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "exports": {
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
   }
 }
