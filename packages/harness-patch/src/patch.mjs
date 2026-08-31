@@ -1064,7 +1064,7 @@ const A6_CREATE_NEW = `				createUngroupedSession: async (options = {}) => {
 					const current = ctx.sessions.list.getSnapshot().current;
 					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
 					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
-					const result = await ctx.get("connection").rpc.call("/api", "session.create", { args: payload }, void 0);
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", payload, void 0);
 					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
 					if (options.open !== false) await ctx.sessions.open(result.value.sessionId);
 					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
@@ -1292,6 +1292,601 @@ export async function applyMoveErrorClarityPatch(dshInstall) {
   for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
   next = next.replace('const workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {',
     `// dsh-toolbox move-error-clarity\n\t\t\tconst workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}
+
+// --- workspace bundle host patch (v10): unarchive + cross-directory move -----
+
+const WSBUNDLE_MARKER = 'dsh-toolbox workspace-bundle'
+
+const W10_WORKSPACE_OLD = `	archiveSession(sessionId) {
+		return this.enqueueOperation(async () => {
+			if (this.requireState().archivedSessionIds.includes(sessionId)) return;
+			if (!await this.sessionKnown(sessionId)) throw new WorkspaceUnknownSessionError(sessionId);
+			const state = this.requireState();
+			await this.setState({
+				...state,
+				archivedSessionIds: [...state.archivedSessionIds, sessionId]
+			});
+		});
+	}`
+
+const W10_WORKSPACE_NEW = `	archiveSession(sessionId) {
+		return this.enqueueOperation(async () => {
+			if (this.requireState().archivedSessionIds.includes(sessionId)) return;
+			if (!await this.sessionKnown(sessionId)) throw new WorkspaceUnknownSessionError(sessionId);
+			const state = this.requireState();
+			await this.setState({
+				...state,
+				archivedSessionIds: [...state.archivedSessionIds, sessionId]
+			});
+		});
+	}
+	/**
+	* Remove a session id from the archived set (dsh-toolbox workspace bundle).
+	* Resolves without writing when the id is not archived.
+	*/
+	unarchiveSession(sessionId) {
+		return this.enqueueOperation(async () => {
+			const state = this.requireState();
+			if (!state.archivedSessionIds.includes(sessionId)) return;
+			await this.setState({
+				...state,
+				archivedSessionIds: state.archivedSessionIds.filter((id) => id !== sessionId)
+			});
+		});
+	}`
+
+const W10_CMD_OLD = `				return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] });
+			}
+		},
+		host: {`
+
+const W10_CMD_NEW = `				return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] });
+			},
+			async unarchiveSession(request) {
+				const { sessionId } = request.payload;
+				await ctx.workspaceRegistry.unarchiveSession(sessionId);
+				return ok(request, { archivedSessionIds: [...ctx.workspaceRegistry.archivedSessionIds] });
+			},
+			async moveSessionToWorkspace(request) {
+				const { payload } = request;
+				const { workspaceId, sessionId } = payload;
+				const target = ctx.workspaceRegistry.get(WorkspaceId(workspaceId));
+				if (target === void 0) return workspaceNotFound(request, workspaceId);
+				const live = ctx.agents.get(sessionId);
+				if (live !== void 0 && live.status === "running") {
+					return err(request, {
+						code: "session-running",
+						message: \`session "\${sessionId}" is running; stop it before moving it to another workspace\`,
+						details: { sessionId }
+					});
+				}
+				const persistence = ctx.sessionPersistence;
+				const root = persistence === void 0 ? void 0 : persistence.root;
+				if (root === void 0 || typeof root !== "string") {
+					return err(request, { code: "workspace-move-failed", message: "session persistence is unavailable", details: { sessionId } });
+				}
+				const projectKey = (cwd) => {
+					let readable = "";
+					let separatorRun = false;
+					for (let i = 0; i < cwd.length; i++) {
+						const code = cwd.charCodeAt(i);
+						const ch = String.fromCharCode(code);
+						if (ch === "/" || ch === "\\\\" || ch === ":") {
+							if (!separatorRun) readable += "-";
+							separatorRun = true;
+						} else if (ch !== "~" && /^[A-Za-z0-9._-]$/.test(ch)) {
+							readable += ch;
+							separatorRun = false;
+						} else {
+							readable += "~" + code.toString(16).toUpperCase().padStart(4, "0");
+							separatorRun = false;
+						}
+					}
+					const slug = readable.replace(/^-+/, "") || "root";
+					return "--" + slug.slice(0, 251) + "--";
+				};
+				const encodeSegment = (raw) => {
+					let out = "";
+					for (let i = 0; i < raw.length; i++) {
+						const code = raw.charCodeAt(i);
+						const ch = String.fromCharCode(code);
+						if (ch !== "~" && /^[A-Za-z0-9._-]$/.test(ch)) out += ch;
+						else out += "~" + code.toString(16).toUpperCase().padStart(4, "0");
+					}
+					return out;
+				};
+				const { readdir, mkdir, readFile, writeFile, rm } = await import("node:fs/promises");
+				const { join } = await import("node:path");
+				const { constants: zc, zstdCompress, zstdDecompressSync } = await import("node:zlib");
+				const { promisify } = await import("node:util");
+				const zstdCompressAsync = promisify(zstdCompress);
+				const compressFrame = (input) => zstdCompressAsync(input, { params: { [zc.ZSTD_c_checksumFlag]: 1 } });
+				const scanFrames = (buffer) => {
+					const frames = [];
+					let offset = 0;
+					let tornStart;
+					while (offset < buffer.length) {
+						const start = offset;
+						if (buffer.length - offset < 4) { tornStart = start; break; }
+						if (buffer.readUInt32LE(offset) !== 4247762216) throw new Error("invalid frame magic");
+						offset += 4;
+						const descriptor = buffer.readUInt8(offset++);
+						if ((descriptor & 24) !== 0) throw new Error("reserved frame-header bit");
+						const contentSizeFlag = descriptor >>> 6;
+						const singleSegment = (descriptor & 32) !== 0;
+						const checksum = (descriptor & 4) !== 0;
+						const dictionaryFlag = descriptor & 3;
+						const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag;
+						const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag;
+						const remainingHeaderBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes;
+						if (buffer.length - offset < remainingHeaderBytes) { tornStart = start; break; }
+						offset += remainingHeaderBytes;
+						for (;;) {
+							if (buffer.length - offset < 3) { tornStart = start; break; }
+							const blockHeader = buffer.readUIntLE(offset, 3);
+							offset += 3;
+							const lastBlock = (blockHeader & 1) !== 0;
+							const blockType = blockHeader >>> 1 & 3;
+							const blockSize = blockHeader >>> 3;
+							if (blockType === 3) throw new Error("reserved block type");
+							const payloadBytes = blockType === 1 ? 1 : blockSize;
+							if (buffer.length - offset < payloadBytes) { tornStart = start; break; }
+							offset += payloadBytes;
+							if (lastBlock) break;
+						}
+						if (tornStart !== void 0) break;
+						if (checksum) {
+							if (buffer.length - offset < 4) { tornStart = start; break; }
+							offset += 4;
+						}
+						frames.push({ start, end: offset });
+					}
+					return { frames, tornStart };
+				};
+				let foundPath;
+				let header;
+				try {
+					const projects = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => join(root, entry.name));
+					for (const project of projects) {
+						const path = join(project, encodeSegment(sessionId), "session.jsonl.zstd");
+						const bytes = await readFile(path).catch(() => void 0);
+						if (bytes === void 0) continue;
+						const { frames } = scanFrames(bytes);
+						if (frames.length === 0) continue;
+						const first = zstdDecompressSync(bytes.subarray(frames[0].start, frames[0].end));
+						const parsed = JSON.parse(first.subarray(0, -1).toString("utf8"));
+						if (typeof parsed?.id !== "string" || parsed.id !== sessionId) continue;
+						foundPath = path;
+						header = parsed;
+						break;
+					}
+				} catch (error) {
+					return err(request, { code: "workspace-move-failed", message: "cannot read session artifact: " + String(error), details: { sessionId } });
+				}
+				if (foundPath === void 0 || header === void 0) {
+					return err(request, { code: "workspace-move-failed", message: "no stored artifact for session \\"" + sessionId + "\\"", details: { sessionId } });
+				}
+				if (header.cwd === target.path) {
+					return err(request, { code: "workspace-move-invalid", message: "session \\"" + sessionId + "\\" already lives in workspace \\"" + target.path + "\\"", details: { sessionId } });
+				}
+				try {
+					for (const workspace of ctx.workspaceRegistry.list()) {
+						if (workspace.sessionIds.includes(sessionId)) await workspace.detachSession(sessionId);
+					}
+					const bytes = await readFile(foundPath);
+					const { frames } = scanFrames(bytes);
+					const first = zstdDecompressSync(bytes.subarray(frames[0].start, frames[0].end));
+					const rest = bytes.subarray(frames[0].end);
+					const newFirst = await compressFrame(Buffer.from(JSON.stringify({ ...header, cwd: target.path }) + "\\n"));
+					const newDir = join(root, projectKey(target.path), encodeSegment(sessionId));
+					await mkdir(newDir, { recursive: true, mode: 0o700 });
+					await writeFile(join(newDir, "session.jsonl.zstd"), Buffer.concat([newFirst, rest]));
+					await writeFile(join(newDir, "session.jsonl.zstd.pre-move-" + Date.now() + ".bak"), bytes);
+					const check = await readFile(join(newDir, "session.jsonl.zstd"));
+					const { frames: checkFrames } = scanFrames(check);
+					const checkFirst = zstdDecompressSync(check.subarray(checkFrames[0].start, checkFrames[0].end));
+					const checkHeader = JSON.parse(checkFirst.subarray(0, -1).toString("utf8"));
+					if (checkHeader.cwd !== target.path) throw new Error("verification failed after relocation");
+					await rm(dirname(foundPath), { recursive: true, force: true });
+					await target.attachSession(sessionId);
+				} catch (error) {
+					return err(request, { code: "workspace-move-failed", message: "cannot move session \\"" + sessionId + "\\": " + String(error), details: { sessionId } });
+				}
+				return ok(request, { workspace: workspaceView(target) });
+			}
+		},
+		host: {`
+
+const W10_SCHEMA_OLD = `/** workspace.archiveSession response value: the full updated archive set. */
+const workspaceArchiveSessionValueSchema = z$1.object({ archivedSessionIds: z$1.array(sessionIdSchema) });`
+
+const W10_SCHEMA_NEW = `/** workspace.archiveSession response value: the full updated archive set. */
+const workspaceArchiveSessionValueSchema = z$1.object({ archivedSessionIds: z$1.array(sessionIdSchema) });
+/** workspace.unarchiveSession request payload (dsh-toolbox workspace bundle). */
+const workspaceUnarchiveSessionRequestSchema = z$1.object({ sessionId: sessionIdSchema });
+/** workspace.unarchiveSession response value (dsh-toolbox workspace bundle). */
+const workspaceUnarchiveSessionValueSchema = z$1.object({ archivedSessionIds: z$1.array(sessionIdSchema) });
+/** workspace.moveSessionToWorkspace request payload (dsh-toolbox workspace bundle). */
+const workspaceMoveSessionToWorkspaceRequestSchema = z$1.object({
+	workspaceId: workspaceIdSchema,
+	sessionId: sessionIdSchema
+});
+/** workspace.moveSessionToWorkspace response value (dsh-toolbox workspace bundle). */
+const workspaceMoveSessionToWorkspaceValueSchema = z$1.object({ workspace: workspaceViewSchema });`
+
+const W10_REGISTRY_OLD = `	"workspace.archiveSession": {
+		schema: workspaceArchiveSessionRequestSchema,
+		invoke: (api, r) => api.workspace.archiveSession(r)
+	},`
+
+const W10_REGISTRY_NEW = `	"workspace.archiveSession": {
+		schema: workspaceArchiveSessionRequestSchema,
+		invoke: (api, r) => api.workspace.archiveSession(r)
+	},
+	"workspace.unarchiveSession": {
+		schema: workspaceUnarchiveSessionRequestSchema,
+		invoke: (api, r) => api.workspace.unarchiveSession(r)
+	},
+	"workspace.moveSessionToWorkspace": {
+		schema: workspaceMoveSessionToWorkspaceRequestSchema,
+		invoke: (api, r) => api.workspace.moveSessionToWorkspace(r)
+	},`
+
+const W10_VALUEMAP_OLD = `	"workspace.archiveSession": workspaceArchiveSessionValueSchema,`
+
+const W10_VALUEMAP_NEW = `	"workspace.archiveSession": workspaceArchiveSessionValueSchema,
+	"workspace.unarchiveSession": workspaceUnarchiveSessionValueSchema,
+	"workspace.moveSessionToWorkspace": workspaceMoveSessionToWorkspaceValueSchema,`
+
+/**
+ * workspace-bundle (v10, host side): the unified workspace-management RPCs.
+ *  - workspace.unarchiveSession — remove a session from the archived set
+ *  - workspace.moveSessionToWorkspace — move a session to ANOTHER directory's
+ *    workspace: refuses running sessions, relocates the log to the target
+ *    project dir, rewrites the header cwd (recompressing the header frame,
+ *    events untouched), keeps a .pre-move backup, verifies before removing
+ *    the old artifact, and updates workspace accounting (detach + attach).
+ */
+export async function applyWorkspaceBundleHostPatch(dshInstall) {
+  const wsTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-workspace', 'lib', 'index.js')
+  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
+  for (const target of [wsTarget, apiTarget]) {
+    if (!existsSync(target)) throw new Error(`workspace-bundle target not found: ${target}`)
+  }
+  const results = []
+  const wsOriginal = readFileSync(wsTarget, 'utf8')
+  if (!wsOriginal.includes('unarchiveSession(sessionId)')) {
+    if (!wsOriginal.includes(W10_WORKSPACE_OLD)) throw new Error('workspace-bundle: dsh-workspace build changed; aborting')
+    const backup = `${wsTarget}.pre-workspace-bundle.bak`
+    if (!existsSync(backup)) copyFileSync(wsTarget, backup)
+    writeFileSync(wsTarget, wsOriginal.replace(W10_WORKSPACE_OLD, W10_WORKSPACE_NEW))
+    results.push({ file: wsTarget, backup, changed: true })
+  } else {
+    results.push({ file: wsTarget, alreadyPatched: true })
+  }
+
+  const apiOriginal = readFileSync(apiTarget, 'utf8')
+  if (!apiOriginal.includes(WSBUNDLE_MARKER)) {
+    const pairs = [
+      [W10_CMD_OLD, W10_CMD_NEW],
+      [W10_SCHEMA_OLD, W10_SCHEMA_NEW],
+      [W10_REGISTRY_OLD, W10_REGISTRY_NEW],
+      [W10_VALUEMAP_OLD, W10_VALUEMAP_NEW],
+    ]
+    for (const [oldText] of pairs) {
+      if (!apiOriginal.includes(oldText)) throw new Error('workspace-bundle: host apiproxy build changed; aborting')
+    }
+    const backup = `${apiTarget}.pre-workspace-bundle.bak`
+    if (!existsSync(backup)) copyFileSync(apiTarget, backup)
+    let next = apiOriginal
+    for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+    next = next.replace('async unarchiveSession(request) {', `// dsh-toolbox workspace-bundle\n\t\t\tasync unarchiveSession(request) {`)
+    writeFileSync(apiTarget, next)
+    results.push({ file: apiTarget, backup, changed: true })
+  } else {
+    results.push({ file: apiTarget, alreadyPatched: true })
+  }
+  return results
+}
+
+// --- workspace bundle client patch (v11): archived folder + unarchive drag ---
+
+const WSBUNDLE_CLIENT_MARKER = 'dsh-toolbox workspace-bundle-client'
+
+const W11_GROUP_OLD = `			const stray = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && !accounted.has(s.id) && s.origin !== "subagent" && !archived.has(s.id));
+			// dsh-toolbox ungrouped-detach: the ungrouped bucket is always
+			// rendered so it can serve as a drop target for moving sessions out
+			// of a workspace (detaching). An empty bucket just shows the header.
+			groups.push(buildGroup("", void 0, void 0, void 0, UNGROUPED_LABEL, ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));`
+
+const W11_GROUP_NEW = `			const archivedMembers = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && archived.has(s.id) && s.origin !== "subagent");
+			// dsh-toolbox workspace-bundle-client: an always-visible archived
+			// folder, so archived sessions can be found and dragged out
+			// (dragging one onto a workspace/ungrouped unarchives it).
+			groups.push(buildGroup("archived", void 0, void 0, void 0, "归档", archivedMembers, "account"));
+			const stray = list.ids.map((id) => list.byId[id]).filter((s) => s !== void 0 && !accounted.has(s.id) && s.origin !== "subagent" && !archived.has(s.id));
+			// dsh-toolbox ungrouped-detach: the ungrouped bucket is always
+			// rendered so it can serve as a drop target for moving sessions out
+			// of a workspace (detaching). An empty bucket just shows the header.
+			groups.push(buildGroup("", void 0, void 0, void 0, UNGROUPED_LABEL, ungroupedOrder === void 0 ? stray : orderedUngrouped(stray, ungroupedOrder), ungroupedOrder === void 0 ? "recency" : "account"));`
+
+const W11_CREATE_OLD = `										onCreate: () => {
+											if (group.workspaceId !== void 0) {
+												setGroupExpanded(group.key, true);
+												startSession(group.workspaceId);
+											} else {
+												createUngroupedSession();
+											}
+										},`
+
+const W11_CREATE_NEW = `										onCreate: () => {
+											if (group.workspaceId !== void 0) {
+												setGroupExpanded(group.key, true);
+												startSession(group.workspaceId);
+											} else if (group.key === "") {
+												createUngroupedSession();
+											}
+										},`
+
+const W11_DROP_OLD = `									if (drag !== null) {
+										if (workspaceId !== void 0) commitSessionToWorkspaceDrag(drag, workspaceId);
+										else commitSessionToUngroupedDrag(drag);
+									} else {`
+
+const W11_DROP_NEW = `									if (drag !== null) {
+										if (workspaceId !== void 0) commitSessionToWorkspaceDrag(drag, workspaceId);
+										else if (group.key === "") commitSessionToUngroupedDrag(drag);
+										else if (group.key === "archived") commitSessionToArchiveDrag(drag);
+									} else {`
+
+const W11_ARCHIVE_FN_OLD = `					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};
+			// dsh-toolbox blue-bar-drag`
+
+const W11_ARCHIVE_FN_NEW = `					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};
+			const commitSessionToArchiveDrag = (activeDrag) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				onSessionArchive(activeDrag.sessionId).catch((reason) => {
+					console.warn("session archive rejected:", reason);
+					try { alert("归档失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};
+			// dsh-toolbox blue-bar-drag`
+
+const W11_WSDRAG_OLD = `			const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).then(() => {
+					setGroupExpanded(workspaceId, true);
+				}).catch((reason) => {
+					workspaceMoveFailureAlert(reason, activeDrag.sessionId, workspaceId);
+				});
+			};`
+
+const W11_WSDRAG_NEW = `			const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const sessionId = activeDrag.sessionId;
+				const unarchived = archivedSessionIds.includes(sessionId) ? unarchiveSession(sessionId) : Promise.resolve();
+				unarchived.then(() => insertSessionBefore(workspaceId, sessionId, void 0).then(() => {
+					setGroupExpanded(workspaceId, true);
+				}, (reason) => {
+					const message = (reason === null || reason === void 0 ? void 0 : reason.message) ?? String(reason);
+					if (message.includes("not accounted")) {
+						const workspace = workspaces.find((item) => item.workspaceId === workspaceId);
+						try {
+							if (confirm("该会话的工作目录与目标工作区「" + (workspace === void 0 ? workspaceId : workspace.path) + "」不同。移动会改变会话的工作目录（仅支持未运行的会话）。是否继续？")) {
+								return moveSessionToWorkspace(workspaceId, sessionId).then(() => {
+									setGroupExpanded(workspaceId, true);
+								});
+							}
+						} catch {}
+					}
+					throw reason;
+				})).catch((reason) => {
+					workspaceMoveFailureAlert(reason, sessionId, workspaceId);
+				});
+			};`
+
+const W11_UNGROUPED_OLD = `			const commitSessionToUngroupedDrag = (activeDrag) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const owner = workspaces.find((workspace) => workspace.sessionIds.includes(activeDrag.sessionId));
+				if (owner === void 0) return;
+				detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const W11_UNGROUPED_NEW = `			const commitSessionToUngroupedDrag = (activeDrag) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const sessionId = activeDrag.sessionId;
+				const unarchived = archivedSessionIds.includes(sessionId) ? unarchiveSession(sessionId) : Promise.resolve();
+				unarchived.then(() => {
+					const owner = workspaces.find((workspace) => workspace.sessionIds.includes(sessionId));
+					if (owner === void 0) return;
+					return detachSession(owner.workspaceId, sessionId);
+				}).catch((reason) => {
+					console.warn("session detach rejected:", reason);
+					try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});
+			};`
+
+const W11_CROSS_OLD = `			const commitSessionCrossGroupDrag = (activeDrag, over) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const targetKey = over.accountKey;
+				if (targetKey === "") {
+					const owner = workspaces.find((workspace) => workspace.sessionIds.includes(activeDrag.sessionId));
+					if (owner === void 0) return;
+					detachSession(owner.workspaceId, activeDrag.sessionId).catch((reason) => {
+						console.warn("session detach rejected:", reason);
+						try { alert("移出工作区失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+					});
+					return;
+				}
+				const targetWorkspace = workspaces.find((workspace) => workspace.workspaceId === targetKey);
+				const ids = targetWorkspace?.sessionIds ?? [];
+				const targetIndex = ids.indexOf(over.id);
+				const anchor = over.half === "before" ? over.id : (targetIndex >= 0 ? ids[targetIndex + 1] : void 0);
+				insertSessionBefore(targetKey, activeDrag.sessionId, anchor).then(() => {
+					setGroupExpanded(targetKey, true);
+				}).catch((reason) => {
+					workspaceMoveFailureAlert(reason, activeDrag.sessionId, targetKey);
+				});
+			};`
+
+const W11_CROSS_NEW = `			const commitSessionCrossGroupDrag = (activeDrag, over) => {
+				if (sessionDropCommitted.current) return;
+				sessionDropCommitted.current = true;
+				setDrag(null);
+				setSessionDropMarker(null);
+				const sessionId = activeDrag.sessionId;
+				const targetKey = over.accountKey;
+				const unarchived = archivedSessionIds.includes(sessionId) ? unarchiveSession(sessionId) : Promise.resolve();
+				unarchived.then(() => {
+					if (targetKey === "") {
+						const owner = workspaces.find((workspace) => workspace.sessionIds.includes(sessionId));
+						if (owner === void 0) return;
+						return detachSession(owner.workspaceId, sessionId);
+					}
+					if (targetKey === "archived") return;
+					const targetWorkspace = workspaces.find((workspace) => workspace.workspaceId === targetKey);
+					const ids = targetWorkspace?.sessionIds ?? [];
+					const targetIndex = ids.indexOf(over.id);
+					const anchor = over.half === "before" ? over.id : (targetIndex >= 0 ? ids[targetIndex + 1] : void 0);
+					return insertSessionBefore(targetKey, sessionId, anchor).then(() => {
+						setGroupExpanded(targetKey, true);
+					}, (reason) => {
+						const message = (reason === null || reason === void 0 ? void 0 : reason.message) ?? String(reason);
+						if (message.includes("not accounted")) {
+							try {
+								if (confirm("该会话的工作目录与目标工作区「" + (targetWorkspace === void 0 ? targetKey : targetWorkspace.path) + "」不同。移动会改变会话的工作目录（仅支持未运行的会话）。是否继续？")) {
+									return moveSessionToWorkspace(targetKey, sessionId).then(() => {
+										setGroupExpanded(targetKey, true);
+									});
+								}
+							} catch {}
+						}
+						throw reason;
+					});
+				}).catch((reason) => {
+					workspaceMoveFailureAlert(reason, sessionId, targetKey);
+				});
+			};`
+
+const W11_ST_PROPS_OLD = `function SessionTree({ useSessions, startSession, createUngroupedSession, open, forkSession,`
+
+const W11_ST_PROPS_NEW = `function SessionTree({ useSessions, startSession, createUngroupedSession, unarchiveSession, moveSessionToWorkspace, open, forkSession,`
+
+const W11_WB_PROPS_OLD = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, createUngroupedSession, open, renameSession,`
+
+const W11_WB_PROPS_NEW = `function WorkspaceBrowser({ wide, expandSidebar, useSessions, useWorkspaces, useStore, actions, startSession, createUngroupedSession, unarchiveSession, moveSessionToWorkspace, open, renameSession,`
+
+const W11_RENDER_OLD = `							startSession,
+							createUngroupedSession,
+							open,`
+
+const W11_RENDER_NEW = `							startSession,
+							createUngroupedSession,
+							unarchiveSession,
+							moveSessionToWorkspace,
+							open,`
+
+const W11_INJECT_OLD = `				createUngroupedSession: async (options = {}) => {
+					const snapshot = ctx.workspaces.list.getSnapshot();
+					const items = snapshot?.items ?? [];
+					const current = ctx.sessions.list.getSnapshot().current;
+					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
+					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", payload, void 0);
+					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					if (options.open !== false) await ctx.sessions.open(result.value.sessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+const W11_INJECT_NEW = `				createUngroupedSession: async (options = {}) => {
+					const snapshot = ctx.workspaces.list.getSnapshot();
+					const items = snapshot?.items ?? [];
+					const current = ctx.sessions.list.getSnapshot().current;
+					const workspace = items.find((item) => item.sessionIds.includes(current)) ?? items[0];
+					const payload = workspace?.path === void 0 ? {} : { cwd: workspace.path };
+					const result = await ctx.get("connection").rpc.call("/api", "session.create", payload, void 0);
+					if (!result.ok) throw new Error('create ungrouped session failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					if (options.open !== false) await ctx.sessions.open(result.value.sessionId);
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},
+				unarchiveSession: async (sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.unarchiveSession", { sessionId }, void 0);
+					if (!result.ok) throw new Error('unarchive failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},
+				moveSessionToWorkspace: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.moveSessionToWorkspace", { workspaceId, sessionId }, void 0);
+					if (!result.ok) throw new Error('cross-directory move failed: ' + (result.error?.code ?? '') + ': ' + (result.error?.message ?? ''));
+					await (ctx.workspaces.refresh === void 0 ? void 0 : ctx.workspaces.refresh());
+				},`
+
+/**
+ * workspace-bundle-client (v11): the archived folder + drag-based unarchive.
+ *  - an always-visible "归档" folder in the sidebar lists archived sessions
+ *  - dragging an archived session onto a workspace/ungrouped unarchives it
+ *    first, then attaches/moves (cross-directory moves ask for confirmation
+ *    and call workspace.moveSessionToWorkspace)
+ *  - dropping a session onto the archived folder archives it
+ */
+export async function applyWorkspaceBundleClientPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`workspace-bundle-client target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(WSBUNDLE_CLIENT_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  const pairs = [
+    [W11_GROUP_OLD, W11_GROUP_NEW],
+    [W11_CREATE_OLD, W11_CREATE_NEW],
+    [W11_DROP_OLD, W11_DROP_NEW],
+    [W11_ARCHIVE_FN_OLD, W11_ARCHIVE_FN_NEW],
+    [W11_WSDRAG_OLD, W11_WSDRAG_NEW],
+    [W11_UNGROUPED_OLD, W11_UNGROUPED_NEW],
+    [W11_CROSS_OLD, W11_CROSS_NEW],
+    [W11_ST_PROPS_OLD, W11_ST_PROPS_NEW],
+    [W11_WB_PROPS_OLD, W11_WB_PROPS_NEW],
+    [W11_RENDER_OLD, W11_RENDER_NEW],
+    [W11_INJECT_OLD, W11_INJECT_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('workspace-bundle-client: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-workspace-bundle-client.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('const commitSessionToArchiveDrag = (activeDrag) => {',
+    `// dsh-toolbox workspace-bundle-client\n\t\t\tconst commitSessionToArchiveDrag = (activeDrag) => {`)
   writeFileSync(clientTarget, next)
   return [{ file: clientTarget, backup, changed: true }]
 }

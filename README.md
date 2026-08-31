@@ -57,6 +57,15 @@ wxy-session-care repair --session <sessionId> --apply   # 只修某一个会话
 
 选项：`--root <dir>` 会话根目录；`--session <id>` 只处理指定会话；`--json` 机器可读输出；`--compression <zstd|none>`；`--dsh-install <path>`。
 
+### 已知错误消息速查（搜索你的报错，判断是否一致）
+
+| 你看到的错误 | 含义 | 处理 |
+|---|---|---|
+| `corrupt session log: seq gap in committed region at line N (expected X, got Y)` | 事件序号重复/回退——通常是中断时多写了一对 `step/end`+`turn/end`，随后真实续写又从旧序号开始 | `repair --apply`（`drop-duplicate-segment`，保留真实续写） |
+| `corrupt Zstandard session log: first frame is not exactly one header line` | 日志的 zstd 帧布局违规（例如整个日志被重压成单个 frame；读端要求第一个 frame 恰好是 header 一行） | `repair --apply`（`repackage-frames`） |
+| `handler failure: corrupt Zstandard session log: ...`（整个会话列表/界面打不开，含模型列表） | 会话根目录里存在坏日志，列表扫描整体抛错 | 先 `health` 定位，再 `repair --apply` |
+| `corrupt session log: invalid header line in ...` / `header id ... does not match ...` | header 损坏，或日志放错了位置 | `unrepairable` 或手动改名/从备份恢复 |
+
 ### 适用时机
 - Harness 报 `corrupt session log` / `handler failure`、界面（含模型列表）打不开时；
 - 升级后想快速确认所有日志健康时。
@@ -66,7 +75,7 @@ wxy-session-care repair --session <sessionId> --apply   # 只修某一个会话
 ## 插件 2：`harness-patch` — 给已安装的 Harness 打本地补丁（命令行应用 · 效果在界面/host）
 
 ### 功能 / 用途
-在**已安装的 dsh 包**上打本地补丁（幂等、修改前自动备份、应用后自校验、失败自动回滚；`npm i -g` 升级 Harness 后需重跑）。按能力拆成 9 个可独立应用的补丁：
+在**已安装的 dsh 包**上打本地补丁（幂等、修改前自动备份、应用后自校验、失败自动回滚；`npm i -g` 升级 Harness 后需重跑）。**一条命令全部应用**，内部按依赖顺序依次打：韧性补丁 + 实时跨工作区移动 + 未分组/归档文件夹管理 + 跨目录移动。拆开看是这些能力：
 
 | 补丁（flag） | 能力 | 生效方式 |
 |---|---|---|
@@ -80,24 +89,20 @@ wxy-session-care repair --session <sessionId> --apply   # 只修某一个会话
 | `--blank-visible` | 未分组桶**显示空会话**（默认空会话在侧边栏被隐藏——这正是"看不见锚点"的根因） | client → 刷新 |
 | `--detach-payload-fix` | 修复 raw RPC 载荷封装 bug（`{args:...}` → 裸载荷），否则 detach/create 校验失败 | client → 刷新 |
 
-**推荐一次性应用全部**（有依赖顺序，脚本会校验前置补丁是否已打）：
+**用法（一条命令）**：
 
 ```sh
-wxy-harness-patch
-wxy-harness-patch --workspace-live
-wxy-harness-patch --workspace-live-v2
-wxy-harness-patch --ungrouped-detach
-wxy-harness-patch --blue-bar
-wxy-harness-patch --new-session-anchor
-wxy-harness-patch --ungrouped-anchor
-wxy-harness-patch --blank-visible
-wxy-harness-patch --detach-payload-fix
+wxy-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重跑）
 ```
 
-应用后：**刷新浏览器**（客户端补丁立即生效）+ **重启一次 Harness**（host 侧补丁：韧性、attach、detach RPC 生效）。
+应用后：**刷新浏览器**（客户端能力立即生效）+ **重启一次 Harness**（host 侧 RPC：韧性、attach、detach、unarchive、跨目录移动生效）。
+
+> 高级：如需单独重打某项，可用 `--workspace-live` / `--workspace-live-v2` / `--ungrouped-detach` / `--blue-bar` / `--new-session-anchor` / `--ungrouped-anchor` / `--blank-visible` / `--detach-payload-fix` / `--move-error-clarity` / `--workspace-bundle`。
 
 ### 界面能力一览（补丁后的效果）
-- 侧边栏把"未分组"的会话**拖到工作区**（或反过来拖到未分组）——显示蓝色插入条，松手即插入到精确位置；
+- 侧边栏把会话**拖到工作区 / 未分组 / 归档文件夹**——显示蓝色插入条，松手即插入到精确位置；
+- **归档文件夹**常驻显示归档会话：拖到工作区/未分组即**解除归档**并移入；拖进归档文件夹即归档；
+- **跨目录移动**：把会话拖到另一个目录的工作区时，弹窗确认后会把会话的工作目录改为目标工作区并移动（仅支持未运行的会话；运行时拒绝）；
 - 未分组桶永远有一个**可见的空会话**（可点开直接开始新对话，也是拖拽落点）；
 - 一个坏日志不再导致整个界面（含模型列表）打不开。
 

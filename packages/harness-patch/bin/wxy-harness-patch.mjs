@@ -45,7 +45,42 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch, applyUngroupedAnchorPatch, applyUngroupedBlankVisiblePatch, applyDetachPayloadFix, applyMoveErrorClarityPatch } = await import('../src/patch.mjs')
+  const patch = await import('../src/patch.mjs')
+  const applyAll = async () => {
+    const steps = [
+      ['韧性补丁', () => patch.applyResiliencePatch(dshInstall)],
+      ['workspace-live(v1)', () => patch.applyWorkspaceLivePatch(dshInstall)],
+      ['workspace-live-v2', () => patch.applyWorkspaceLivePatchV2(dshInstall)],
+      ['ungrouped-detach(v3)', () => patch.applyUngroupedDetachPatch(dshInstall)],
+      ['blue-bar(v4)', () => patch.applyBlueBarDragPatch(dshInstall)],
+      ['new-session-anchor(v5)', () => patch.applyUngroupedNewSessionPatch(dshInstall)],
+      ['ungrouped-anchor(v6)', () => patch.applyUngroupedAnchorPatch(dshInstall)],
+      ['blank-visible(v7)', () => patch.applyUngroupedBlankVisiblePatch(dshInstall)],
+      ['detach-payload-fix(v8)', () => patch.applyDetachPayloadFix(dshInstall)],
+      ['move-error-clarity(v9)', () => patch.applyMoveErrorClarityPatch(dshInstall)],
+      ['workspace-bundle host(v10)', () => patch.applyWorkspaceBundleHostPatch(dshInstall)],
+      ['workspace-bundle client(v11)', () => patch.applyWorkspaceBundleClientPatch(dshInstall)],
+    ]
+    for (const [label, fn] of steps) {
+      try {
+        const results = await fn()
+        const list = Array.isArray(results) ? results : [results]
+        for (const result of list) {
+          if (result.alreadyPatched === true) console.log('✓ 已应用过:', label)
+          else console.log('✓ 已应用:', label, result.file)
+        }
+      } catch (error) {
+        console.error('✗ 失败:', label, '-', error.message)
+        process.exitCode = 1
+        return
+      }
+    }
+    console.log('\n全部补丁已应用。client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
+  }
+  if (flags.all === true || Object.keys(flags).filter((k) => k !== 'dsh-install' && k !== 'all' && k !== 'help').length === 0) {
+    await applyAll()
+    return
+  }
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -119,12 +154,23 @@ async function main() {
     return
   }
   if (flags['move-error-clarity'] === true) {
-    const results = await applyMoveErrorClarityPatch(dshInstall)
+    const results = await patch.applyMoveErrorClarityPatch(dshInstall)
     for (const result of results) {
       if (result.alreadyPatched === true) console.log('已应用过:', result.file)
       else console.log('已应用:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: 刷新浏览器即可——跨目录移动失败时会说明会话工作目录与目标工作区路径的差异。')
+    return
+  }
+  if (flags['workspace-bundle'] === true) {
+    for (const fn of [() => patch.applyWorkspaceBundleHostPatch(dshInstall), () => patch.applyWorkspaceBundleClientPatch(dshInstall)]) {
+      const results = await fn()
+      for (const result of results) {
+        if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+        else console.log('已应用:', result.file, '\n  备份:', result.backup)
+      }
+    }
+    console.log('注意: 归档文件夹/拖拽解除归档需刷新浏览器；unarchive/跨目录移动 RPC 需重启一次 Harness。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)
