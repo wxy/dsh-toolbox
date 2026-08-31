@@ -45,7 +45,7 @@ async function main() {
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
-  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch, applyUngroupedAnchorPatch, applyUngroupedBlankVisiblePatch } = await import('../src/patch.mjs')
+  const { applyResiliencePatch, applyWorkspaceLivePatch, applyWorkspaceLivePatchV2, applyUngroupedDetachPatch, applyBlueBarDragPatch, applyUngroupedNewSessionPatch, applyUngroupedAnchorPatch, applyUngroupedBlankVisiblePatch, applyDetachPayloadFix, applyMoveErrorClarityPatch } = await import('../src/patch.mjs')
   if (flags['workspace-live'] === true) {
     const results = await applyWorkspaceLivePatch(dshInstall)
     for (const result of results) {
@@ -107,6 +107,24 @@ async function main() {
       else console.log('已应用:', result.file, '\n  备份:', result.backup)
     }
     console.log('注意: 刷新浏览器即可——未分组桶现在会显示空会话（默认是被隐藏的），既有锚点也可见。')
+    return
+  }
+  if (flags['detach-payload-fix'] === true) {
+    const results = await applyDetachPayloadFix(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 修复 rpc.call 载荷封装（去掉 {args:...} 包装）。刷新浏览器即可。')
+    return
+  }
+  if (flags['move-error-clarity'] === true) {
+    const results = await applyMoveErrorClarityPatch(dshInstall)
+    for (const result of results) {
+      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
+      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+    }
+    console.log('注意: 刷新浏览器即可——跨目录移动失败时会说明会话工作目录与目标工作区路径的差异。')
     return
   }
   const result = await applyResiliencePatch(dshInstall)

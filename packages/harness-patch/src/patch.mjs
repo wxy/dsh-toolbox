@@ -1167,3 +1167,131 @@ export async function applyUngroupedBlankVisiblePatch(dshInstall) {
   writeFileSync(clientTarget, original.replace(B7_STRAY_OLD, B7_STRAY_NEW))
   return [{ file: clientTarget, backup, changed: true }]
 }
+
+// --- detach payload fix (v8): raw rpc.call takes the BARE payload -----------
+
+const DETACHFIX_MARKER = 'dsh-toolbox detach-payload-fix'
+
+const F8_DETACH_OLD = `				detachSession: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.detachSession", { args: { workspaceId, sessionId } }, void 0);`
+
+const F8_DETACH_NEW = `				detachSession: async (workspaceId, sessionId) => {
+					const result = await ctx.get("connection").rpc.call("/api", "workspace.detachSession", { workspaceId, sessionId }, void 0);`
+
+const F8_CREATE_OLD = `					const result = await ctx.get("connection").rpc.call("/api", "session.create", { args: payload }, void 0);`
+
+const F8_CREATE_NEW = `					const result = await ctx.get("connection").rpc.call("/api", "session.create", payload, void 0);`
+
+/**
+ * detach-payload-fix (v8): the browser connection's rpc.call forwards its
+ * third argument verbatim as the message payload (callUnary-style), and the
+ * host validates it against the method schema directly — the `{ args: ... }`
+ * envelope is only a test-fixture convention. Without this fix the client
+ * sent `{ args: { workspaceId, sessionId } }`, which fails validation with
+ * "invalid payload for workspace.detachSession"; the same wrapper silently
+ * dropped `cwd` on session.create.
+ */
+export async function applyDetachPayloadFix(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`detach-payload-fix target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(DETACHFIX_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  const pairs = [
+    [F8_DETACH_OLD, F8_DETACH_NEW],
+    [F8_CREATE_OLD, F8_CREATE_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('detach-payload-fix: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-detach-payload-fix.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('detachSession: async (workspaceId, sessionId) => {',
+    `// dsh-toolbox detach-payload-fix\n\t\t\t\tdetachSession: async (workspaceId, sessionId) => {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}
+
+// --- clear cross-directory move error (v9) ---------------------------------
+
+const MOVERR_MARKER = 'dsh-toolbox move-error-clarity'
+
+const M9_HELPER_OLD = `			const commitSessionDrag = (activeDrag, over) => {`
+
+const M9_HELPER_NEW = `			const workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {
+				const message = (reason === null || reason === void 0 ? void 0 : reason.message) ?? String(reason);
+				if (message.includes("not accounted")) {
+					const summary = list.byId[sessionId];
+					const workspace = workspaces.find((item) => item.workspaceId === workspaceId);
+					console.warn("session move rejected:", reason);
+					try {
+						alert("无法移动会话：会话的工作目录是「" + (summary === void 0 ? "未知" : summary.cwd ?? "未知") + "」，目标工作区是「" + (workspace === void 0 ? workspaceId : workspace.path) + "」。Harness 将会话绑定到它的工作目录，跨目录移动会改变会话的工作目录（当前仅支持未运行的会话）。如需在该工作区使用，请在该工作区新建会话。");
+					} catch {}
+					return;
+				}
+				console.warn("session move rejected:", reason);
+				try { alert("移动会话失败：" + message); } catch {}
+			};
+			const commitSessionDrag = (activeDrag, over) => {`
+
+const M9_CATCH1_OLD = `				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).then(() => {
+					setGroupExpanded(workspaceId, true);
+				}).catch((reason) => {
+					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});`
+
+const M9_CATCH1_NEW = `				insertSessionBefore(workspaceId, activeDrag.sessionId, void 0).then(() => {
+					setGroupExpanded(workspaceId, true);
+				}).catch((reason) => {
+					workspaceMoveFailureAlert(reason, activeDrag.sessionId, workspaceId);
+				});`
+
+const M9_CATCH2_OLD = `				insertSessionBefore(targetKey, activeDrag.sessionId, anchor).then(() => {
+					setGroupExpanded(targetKey, true);
+				}).catch((reason) => {
+					console.warn("session move rejected:", reason);
+					try { alert("移动会话失败：" + ((reason === null || reason === void 0 ? void 0 : reason.message) ?? reason)); } catch {}
+				});`
+
+const M9_CATCH2_NEW = `				insertSessionBefore(targetKey, activeDrag.sessionId, anchor).then(() => {
+					setGroupExpanded(targetKey, true);
+				}).catch((reason) => {
+					workspaceMoveFailureAlert(reason, activeDrag.sessionId, targetKey);
+				});`
+
+/**
+ * move-error-clarity (v9): explain WHY a cross-directory move fails. The host
+ * rejects with the domain's cryptic "session is not accounted" when the
+ * session's header cwd does not match the target workspace path (sessions are
+ * bound to their working directory). The client now shows the session cwd and
+ * the target workspace path and explains the model, instead of a bare
+ * workspace-move-invalid message.
+ */
+export async function applyMoveErrorClarityPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`move-error-clarity target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(MOVERR_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  const pairs = [
+    [M9_HELPER_OLD, M9_HELPER_NEW],
+    [M9_CATCH1_OLD, M9_CATCH1_NEW],
+    [M9_CATCH2_OLD, M9_CATCH2_NEW],
+  ]
+  for (const [oldText] of pairs) {
+    if (!original.includes(oldText)) {
+      throw new Error('move-error-clarity: a text block no longer matches; aborting without touching the bundle')
+    }
+  }
+  const backup = `${clientTarget}.pre-move-error-clarity.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  let next = original
+  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
+  next = next.replace('const workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {',
+    `// dsh-toolbox move-error-clarity\n\t\t\tconst workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {`)
+  writeFileSync(clientTarget, next)
+  return [{ file: clientTarget, backup, changed: true }]
+}
