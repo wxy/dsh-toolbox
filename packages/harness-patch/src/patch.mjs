@@ -2187,3 +2187,48 @@ export async function applyMoveLiveSafePatch(dshInstall) {
   }
   return [{ file: apiTarget, backup, changed: true, verified: check.stdout.trim() || 'syntax ok' }]
 }
+
+// --- session id in hover card (v16) ----------------------------------------
+
+const HOVERID_MARKER = 'dsh-toolbox hover-session-id'
+
+const W16_OLD = `					(0, react_jsx_runtime.jsx)("div", {
+						className: Rows_module_css_default.hoverTitle,
+						children: displayTitle(node, t)
+					}),
+					!node.blank && (0, react_jsx_runtime.jsx)("div", {
+						className: Rows_module_css_default.hoverTime,
+						children: hoverTimeLabel(node.updatedAt, now, t)
+					}),`
+
+const W16_NEW = `					(0, react_jsx_runtime.jsx)("div", {
+						className: Rows_module_css_default.hoverTitle,
+						children: displayTitle(node, t)
+					}),
+					(0, react_jsx_runtime.jsx)("div", {
+						className: Rows_module_css_default.hoverTime,
+						children: "ID: " + node.id
+					}),
+					!node.blank && (0, react_jsx_runtime.jsx)("div", {
+						className: Rows_module_css_default.hoverTime,
+						children: hoverTimeLabel(node.updatedAt, now, t)
+					}),`
+
+/**
+ * hover-session-id (v16): show the session id in the session row's hover
+ * card (the tooltip that appears on mouse-over of a session name), so users
+ * can copy/look up the id without opening the conversation.
+ */
+export async function applyHoverSessionIdPatch(dshInstall) {
+  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
+  if (!existsSync(clientTarget)) throw new Error(`hover-session-id target not found: ${clientTarget}`)
+  const original = readFileSync(clientTarget, 'utf8')
+  if (original.includes(HOVERID_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (!original.includes(W16_OLD)) {
+    throw new Error('hover-session-id: the hover content block no longer matches; aborting without touching the bundle')
+  }
+  const backup = `${clientTarget}.pre-hover-session-id.bak`
+  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
+  writeFileSync(clientTarget, original.replace(W16_OLD, W16_NEW))
+  return [{ file: clientTarget, backup, changed: true }]
+}

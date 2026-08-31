@@ -70,6 +70,7 @@ async function main() {
       ['move-persistence-fix(v13)', () => patch.applyMovePersistenceFix(dshInstall)],
       ['empty-drop-row(v14)', () => patch.applyEmptyDropRowPatch(dshInstall)],
       ['hover-placeholder(v15)', () => patch.applyHoverPlaceholderPatch(dshInstall)],
+      ['hover-session-id(v16)', () => patch.applyHoverSessionIdPatch(dshInstall)],
       ['move-live-safe(v16)', () => patch.applyMoveLiveSafePatch(dshInstall)],
     ]
     for (const [label, fn] of steps) {
