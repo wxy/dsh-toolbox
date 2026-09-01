@@ -99,12 +99,12 @@ async function main() {
   }
 
   if (flags.status === true) {
-    console.log('== 特性组状态（只读） ==')
+    console.log('== 特性组状态（只读，按序模拟应用后的结果） ==')
     for (const s of patch.groupStatus(dshInstall)) {
       const parts = s.perFile.map((f) => f.missing
         ? `${f.fileKey}: 文件缺失`
-        : `${f.fileKey}: 补丁 ${f.markers} | 就绪块 ${f.ready} | 漂移块 ${f.drifted}`).join(' | ')
-      const state = s.patched ? '已打' : (s.any ? '部分' : '未打')
+        : `${f.fileKey}: 待应用 ${f.applied} | 已具备 ${f.already} | 无法匹配 ${f.skipped}`).join(' | ')
+      const state = s.patched ? '已打' : (s.any ? '已打(部分)' : '未打')
       console.log(`  ${s.name}（${s.label}）[${state}${s.backupExists ? '，有备份' : ''}]\n    ${parts}`)
     }
     return

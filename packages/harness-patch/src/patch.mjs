@@ -2041,10 +2041,15 @@ export async function unapplyGroup(dshInstall, groupName) {
   return results
 }
 
-/** Report per-group state without touching anything. */
+/**
+ * Report per-group state without touching anything. Simulates a full apply in
+ * memory (same patch-grouped order as applyGroup) so the numbers reflect what
+ * an actual run would do: many blocks' `old` is code written by an earlier
+ * patch, so a naive static check would count them as "drifted" on a pristine
+ * install even though applying resolves them in order.
+ */
 export function groupStatus(dshInstall) {
   const out = []
-  const satisfiedBlocks = (fileBlocks, text) => fileBlocks.filter((b) => text.includes(b.patchMarker) || (!b.skipNewCheck && text.includes(b.new))).length
   for (const [name, group] of Object.entries(FEATURE_GROUPS)) {
     const perFile = []
     let allPatched = true
@@ -2052,16 +2057,28 @@ export function groupStatus(dshInstall) {
     for (const [fileKey, fileBlocks] of Object.entries(group.files)) {
       const target = filePath(dshInstall, fileKey)
       if (!existsSync(target)) { perFile.push({ fileKey, missing: true }); allPatched = false; continue }
-      const text = readFileSync(target, 'utf8')
-      const markers = [...new Set(fileBlocks.map((b) => b.patchMarker))]
-      const appliedMarkers = markers.filter((m) => text.includes(m)).length
-      // a block is satisfied when its patch marker OR its new text is present
-      // (some patches are content-idempotent and never write a marker comment)
-      const satisfied = (b) => text.includes(b.patchMarker) || (!b.skipNewCheck && text.includes(b.new))
-      const driftBlocks = fileBlocks.filter((b) => !satisfied(b) && !text.includes(b.old))
-      const readyBlocks = fileBlocks.filter((b) => satisfied(b) || text.includes(b.old))
-      const filePatched = satisfiedBlocks(fileBlocks, text) === fileBlocks.length
-      perFile.push({ fileKey, markers: `${appliedMarkers}/${markers.length}`, ready: readyBlocks.length, drifted: driftBlocks.length, patched: filePatched })
+      let text = readFileSync(target, 'utf8')
+      const stats = { applied: 0, already: 0, skipped: 0, skippedNotes: [] }
+      const patches = new Map()
+      for (const block of fileBlocks) {
+        if (!patches.has(block.patchMarker)) patches.set(block.patchMarker, [])
+        patches.get(block.patchMarker).push(block)
+      }
+      for (const [marker, pblocks] of patches) {
+        if (text.includes(marker)) { stats.already++; continue }
+        for (const block of pblocks) {
+          if (!block.skipNewCheck && text.includes(block.new)) { stats.already++; continue }
+          if (text.includes(block.old)) {
+            text = text.replace(block.old, withMarker(block, marker))
+            stats.applied++
+          } else {
+            stats.skipped++
+            stats.skippedNotes.push(block.note)
+          }
+        }
+      }
+      const filePatched = stats.applied === 0 && stats.skipped === 0
+      perFile.push({ fileKey, ...stats, patched: filePatched })
       if (filePatched) anyPatched = true
       else allPatched = false
     }
