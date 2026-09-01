@@ -36,6 +36,11 @@ async function main() {
   dtb-harness-patch                   一条命令应用全部补丁（幂等，升级 Harness 后重跑）
   dtb-harness-patch --all             同上（显式）
 
+版本检测:
+  运行时会读取已安装 @deepseek-ai/dsh 的版本，与已验证版本列表对比；
+  不在列表中时中止（补丁是精确字符串替换，未验证版本可能已改动匹配块）。
+  确认要尝试时加 --allow-unverified 跳过检查。
+
 高级（单独重打某一项，一般不需要）:
   --workspace-live / --workspace-live-v2 / --ungrouped-detach / --blue-bar
   --new-session-anchor / --ungrouped-anchor / --blank-visible
@@ -53,6 +58,22 @@ async function main() {
   const dshInstall = findDshInstall(flags['dsh-install'])
   const patch = await import('../src/patch.mjs')
   const applyAll = async () => {
+    // Version gate: the patches are exact string replacements, so a harness
+    // version we have not validated may have changed the matching blocks.
+    const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
+    if (version === null) {
+      console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（继续执行，补丁将按字符串匹配，任一不匹配即中止且不改动文件）')
+    } else if (supported) {
+      console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
+    } else if (flags['allow-unverified'] === true) {
+      console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过检查（补丁仍按字符串匹配，任一不匹配即中止且不改动文件）`)
+    } else {
+      console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
+      console.error(`  补丁是精确字符串替换，未验证的版本可能已改动匹配块（如 v8 的 session.create 载荷）。`)
+      console.error(`  如果你确认要尝试，请加 --allow-unverified 跳过此检查；任一匹配块不匹配时补丁会中止且不改动文件。`)
+      process.exitCode = 1
+      return
+    }
     const steps = [
       ['韧性补丁', () => patch.applyResiliencePatch(dshInstall)],
       ['workspace-live(v1)', () => patch.applyWorkspaceLivePatch(dshInstall)],
@@ -79,7 +100,7 @@ async function main() {
         const list = Array.isArray(results) ? results : [results]
         for (const result of list) {
           if (result.alreadyPatched === true) console.log('✓ 已应用过:', label)
-          else console.log('✓ 已应用:', label, result.file)
+          else console.log('✓ 已应用:', label, result.file ?? result.target)
         }
       } catch (error) {
         console.error('✗ 失败:', label, '-', error.message)
@@ -89,7 +110,7 @@ async function main() {
     }
     console.log('\n全部补丁已应用。client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
   }
-  if (flags.all === true || Object.keys(flags).filter((k) => k !== 'dsh-install' && k !== 'all' && k !== 'help').length === 0) {
+  if (flags.all === true || Object.keys(flags).filter((k) => k !== 'dsh-install' && k !== 'all' && k !== 'help' && k !== 'allow-unverified').length === 0) {
     await applyAll()
     return
   }
@@ -194,7 +215,7 @@ async function main() {
     console.log('注意: 需重启一次 Harness 生效。此后：跨目录移动会拒绝"正在打开"的会话（先切换到别的会话/重启再移动），并且移动失败会原子回滚，不再产生半搬状态。')
     return
   }
-  const result = await applyResiliencePatch(dshInstall)
+  const result = await patch.applyResiliencePatch(dshInstall)
   if (result.alreadyPatched === true) {
     console.log('补丁已应用过，无需重复。', result.target)
   } else {

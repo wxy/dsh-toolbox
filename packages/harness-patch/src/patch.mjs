@@ -1168,6 +1168,36 @@ export async function applyUngroupedBlankVisiblePatch(dshInstall) {
   return [{ file: clientTarget, backup, changed: true }]
 }
 
+// --- harness version detection ----------------------------------------------
+
+/**
+ * Versions of @deepseek-ai/dsh this patch suite was validated against.
+ * The patches are exact string replacements over the installed bundles, so a
+ * version outside this list may have changed the matching blocks. Re-validate
+ * after a harness upgrade and add the new version here once it passes.
+ */
+export const SUPPORTED_DSH_VERSIONS = ['0.1.1-rc.2']
+
+/** Read the installed dsh version from its package.json. */
+export function detectHarnessVersion(dshInstall) {
+  const pkgPath = join(dshInstall, 'package.json')
+  if (!existsSync(pkgPath)) return null
+  try {
+    return JSON.parse(readFileSync(pkgPath, 'utf8')).version ?? null
+  } catch {
+    return null
+  }
+}
+
+export function checkHarnessVersion(dshInstall) {
+  const version = detectHarnessVersion(dshInstall)
+  return {
+    version,
+    supported: version !== null && SUPPORTED_DSH_VERSIONS.includes(version),
+    supportedVersions: SUPPORTED_DSH_VERSIONS,
+  }
+}
+
 // --- detach payload fix (v8): raw rpc.call takes the BARE payload -----------
 
 const DETACHFIX_MARKER = 'dsh-toolbox detach-payload-fix'
@@ -2224,11 +2254,16 @@ export async function applyHoverSessionIdPatch(dshInstall) {
   if (!existsSync(clientTarget)) throw new Error(`hover-session-id target not found: ${clientTarget}`)
   const original = readFileSync(clientTarget, 'utf8')
   if (original.includes(HOVERID_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
+  if (original.includes(W16_NEW)) {
+    // The code change is already in place — earlier applies never wrote the
+    // marker comment, so idempotence must be content-based.
+    return [{ file: clientTarget, alreadyPatched: true }]
+  }
   if (!original.includes(W16_OLD)) {
     throw new Error('hover-session-id: the hover content block no longer matches; aborting without touching the bundle')
   }
   const backup = `${clientTarget}.pre-hover-session-id.bak`
   if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(W16_OLD, W16_NEW))
+  writeFileSync(clientTarget, original.replace(W16_OLD, `// dsh-toolbox hover-session-id\n${W16_NEW}`))
   return [{ file: clientTarget, backup, changed: true }]
 }
