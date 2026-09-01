@@ -1971,7 +1971,7 @@ const withMarker = (block, marker) => {
  * Per file: a group-level backup (<file>.dtb-pre-<group>.bak) is taken once,
  * before the first modification, so unapply restores the exact pre-group state.
  */
-export async function applyGroup(dshInstall, groupName) {
+export async function applyGroup(dshInstall, groupName, onPatch) {
   const group = FEATURE_GROUPS[groupName]
   if (!group) throw new Error(`unknown feature group: ${groupName} (expected one of: ${Object.keys(FEATURE_GROUPS).join(', ')})`)
   const results = []
@@ -1988,20 +1988,26 @@ export async function applyGroup(dshInstall, groupName) {
       patches.get(block.patchMarker).push(block)
     }
     for (const [marker, pblocks] of patches) {
-      if (text.includes(marker)) { stats.already++; continue }
+      if (text.includes(marker)) { stats.already++; onPatch?.({ file: fileKey, marker, applied: 0, already: 1, skipped: 0 }); continue }
       let patchChanged = false
+      let patchApplied = 0
+      let patchAlready = 0
+      let patchSkipped = 0
       for (const block of pblocks) {
-        if (!block.skipNewCheck && text.includes(block.new)) { stats.already++; continue }
+        if (!block.skipNewCheck && text.includes(block.new)) { stats.already++; patchAlready++; continue }
         if (text.includes(block.old)) {
           const replacement = withMarker(block, marker)
           text = text.replace(block.old, replacement)
           stats.applied++
+          patchApplied++
           patchChanged = true
         } else {
           stats.skipped++
+          patchSkipped++
           stats.skippedNotes.push(block.note)
         }
       }
+      onPatch?.({ file: fileKey, marker, applied: patchApplied, already: patchAlready, skipped: patchSkipped })
       // if nothing of this patch applied AND marker absent, add marker so the
       // patch counts as addressed (avoid re-warning forever)
       if (!patchChanged && stats.applied === 0 && !text.includes(marker)) {

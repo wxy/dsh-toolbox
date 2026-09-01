@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 /**
- * dtb-harness-patch — apply, verify, and unapply feature patches on the
- * installed DeepSeek Harness.
+ * dtb-harness-patch — interactive apply / verify / unapply of feature patches
+ * on the installed DeepSeek Harness.
  *
  * Two user-visible feature groups:
  *   session-area — move sessions anywhere in the left sidebar
  *                  (workspace <-> ungrouped <-> archived), all directions.
  *   resilience   — a corrupt session log must not take the session surface down.
  *
- * Applying is declarative per block: official builds that already include a
- * change are detected and skipped; only genuinely missing changes are applied.
- * Group-level backups allow clean unapply.
+ * Default (no flags) runs an interactive flow:
+ *   1. show the current state (one line per file, per group)
+ *   2. ask for confirmation before touching anything
+ *   3. apply group by group, ticking each patch as it completes
+ *   4. on any unmatched block, offer: unapply / upgrade Harness / upgrade
+ *      this patch module — the user decides.
  *
- * Usage:
- *   dtb-harness-patch                    apply all feature groups (default)
- *   dtb-harness-patch --apply <group>    apply one group
- *   dtb-harness-patch --unapply <group>  restore one group from backup
- *   dtb-harness-patch --unapply-all      restore every group from backup
- *   dtb-harness-patch --status           show per-group state (no changes)
- *   dtb-harness-patch --dsh-install <path>   explicit install root
- *   dtb-harness-patch --allow-unverified     skip the version check
+ * Non-interactive flags:
+ *   --apply <group> / --unapply <group> / --unapply-all / --status
+ *   --dsh-install <path> / --allow-unverified / --yes (skip confirmation)
  */
+import { readFileSync } from 'node:fs'
+import readline from 'node:readline'
 import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
 function parseArgs(argv) {
@@ -38,13 +38,19 @@ function parseArgs(argv) {
   return flags
 }
 
+const prompt = (question, rl) => new Promise((resolve) => rl.question(question, resolve))
+const createRl = () => readline.createInterface({ input: process.stdin, output: process.stdout })
+
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
   if (flags.help === true || flags['-h'] === true) {
     console.log(`dtb-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打特性补丁
 
-用法（推荐）:
-  dtb-harness-patch                   应用全部特性组（幂等，升级 Harness 后重跑）
+用法（推荐，交互式）:
+  dtb-harness-patch               查看状态 → 确认 → 逐补丁应用；失败后可撤销/升级
+  dtb-harness-patch --yes         交互流程但跳过"确认"询问（仍打印状态与结果）
+
+非交互命令:
   dtb-harness-patch --apply <组>      只应用一个组（session-area / resilience）
   dtb-harness-patch --unapply <组>    撤销一个组（从组级备份恢复）
   dtb-harness-patch --unapply-all     撤销全部组
@@ -66,49 +72,30 @@ async function main() {
   const dshInstall = findDshInstall(flags['dsh-install'])
   const patch = await import('../src/patch.mjs')
 
-  const checkVersion = () => {
-    const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
-    if (version === null) {
-      console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（继续执行，补丁按逐块字符串匹配，不匹配的块会跳过且不动文件）')
-      return true
-    }
-    if (supported) {
-      console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
-      return true
-    }
-    if (flags['allow-unverified'] === true) {
-      console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过（不匹配的块仍会安全跳过）`)
-      return true
-    }
-    console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
-    console.error(`  补丁是逐块字符串替换：未验证版本中官方已改动的块会被跳过（警告），但已改动的目标代码无法识别时不会误改。`)
-    console.error(`  如确认继续，加 --allow-unverified；或先跑 dtb-harness-patch --status 查看各块匹配情况。`)
-    return false
-  }
+  const FILE_LABEL = { client: 'client.js', host: 'host index.js', workspace: 'workspace index.js', persistence: 'persistence index.js' }
 
-  const applyGroup = async (name) => {
-    const results = await patch.applyGroup(dshInstall, name)
-    for (const result of results) {
-      if (result.changed) {
-        console.log(`✓ 已应用: ${name} ${result.file}`)
-        console.log(`    备份: ${result.backup}  （${result.applied} 块应用，${result.already} 块已具备，${result.skipped} 块跳过）`)
-      } else if (result.alreadyPatched) {
-        console.log(`✓ 已应用过: ${name} ${result.file}（${result.already} 块已具备，${result.skipped} 块跳过）`)
+  const renderStatus = () => {
+    const status = patch.groupStatus(dshInstall)
+    const lines = []
+    for (const s of status) {
+      const state = s.patched ? '✓ 已打' : (s.any ? '◐ 已打(部分)' : '· 未打')
+      lines.push(`\n${s.name}（${s.label}）[${state}${s.backupExists ? '，有备份' : ''}]`)
+      for (const f of s.perFile) {
+        if (f.missing) { lines.push(`    ${FILE_LABEL[f.fileKey] ?? f.fileKey}: 文件缺失`); continue }
+        const mark = f.applied === 0 && f.skipped === 0 ? '✓' : '·'
+        lines.push(`    ${mark} ${FILE_LABEL[f.fileKey] ?? f.fileKey}: 待应用 ${f.applied} | 已具备 ${f.already} | 无法匹配 ${f.skipped}`)
       }
     }
+    return lines
   }
 
-  if (flags.status === true) {
+  const printStatus = () => {
     console.log('== 特性组状态（只读，按序模拟应用后的结果） ==')
-    for (const s of patch.groupStatus(dshInstall)) {
-      const parts = s.perFile.map((f) => f.missing
-        ? `${f.fileKey}: 文件缺失`
-        : `${f.fileKey}: 待应用 ${f.applied} | 已具备 ${f.already} | 无法匹配 ${f.skipped}`).join(' | ')
-      const state = s.patched ? '已打' : (s.any ? '已打(部分)' : '未打')
-      console.log(`  ${s.name}（${s.label}）[${state}${s.backupExists ? '，有备份' : ''}]\n    ${parts}`)
-    }
-    return
+    for (const line of renderStatus()) console.log(line)
+    console.log()
   }
+
+  if (flags.status === true) { printStatus(); return }
 
   if (flags['unapply-all'] === true) {
     for (const name of Object.keys(patch.FEATURE_GROUPS)) {
@@ -135,18 +122,124 @@ async function main() {
   }
 
   if (flags.apply !== undefined && flags.apply !== true) {
-    if (!checkVersion()) return
-    await applyGroup(flags.apply)
-    console.log(`\n${flags.apply} 已处理。client 补丁刷新浏览器即生效；host 补丁需重启一次 Harness。`)
+    const { version, supported } = patch.checkHarnessVersion(dshInstall)
+    if (!supported && flags['allow-unverified'] !== true && version !== null) {
+      console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表；加 --allow-unverified 强制继续。`)
+      return
+    }
+    const results = await patch.applyGroup(dshInstall, flags.apply)
+    for (const result of results) {
+      if (result.changed) {
+        console.log(`✓ 已应用: ${flags.apply} ${result.file}  （${result.applied} 块应用，${result.already} 块已具备，${result.skipped} 块跳过）`)
+      } else if (result.alreadyPatched) {
+        console.log(`✓ 已应用过: ${flags.apply} ${result.file}（${result.already} 块已具备，${result.skipped} 块跳过）`)
+      }
+    }
     return
   }
 
-  // default: apply all groups
-  if (!checkVersion()) return
-  for (const name of Object.keys(patch.FEATURE_GROUPS)) {
-    await applyGroup(name)
+  // ---------------- interactive flow (default) ----------------
+  const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
+  if (version === null) {
+    console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（补丁按逐块字符串匹配，不匹配的块会跳过且不动文件）')
+  } else if (supported) {
+    console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
+  } else if (flags['allow-unverified'] === true) {
+    console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过（不匹配的块仍会安全跳过）`)
+  } else {
+    console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
+    console.warn('  补丁是逐块字符串替换：未验证版本中官方已改动的块会被跳过（警告），不会误改。')
   }
-  console.log('\n全部特性组已处理。client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
+
+  printStatus()
+
+  let proceed = flags.yes === true
+  if (!proceed) {
+    const rl = createRl()
+    try {
+      const ans = await prompt('是否应用全部特性补丁？(y/N) ', rl)
+      proceed = /^y(es)?$/i.test(ans.trim())
+    } finally {
+      rl.close()
+    }
+  }
+  if (!proceed) {
+    console.log('已取消，未做任何修改。')
+    return
+  }
+
+  // apply group by group with live per-patch ticks
+  let anyUnmatched = false
+  const unmatchedNotes = []
+  for (const name of Object.keys(patch.FEATURE_GROUPS)) {
+    console.log(`\n▸ 应用 ${name} ...`)
+    const results = await patch.applyGroup(dshInstall, name, (tick) => {
+      const fileLabel = FILE_LABEL[tick.file] ?? tick.file
+      if (tick.skipped > 0) {
+        console.log(`  ⚠ ${fileLabel} / ${tick.marker}: ${tick.applied} 块应用，${tick.skipped} 块无法匹配`)
+      } else if (tick.applied > 0) {
+        console.log(`  ✓ ${fileLabel} / ${tick.marker}: 已应用 ${tick.applied} 块`)
+      } else if (tick.already > 0) {
+        console.log(`  ✓ ${fileLabel} / ${tick.marker}: 已具备`)
+      }
+    })
+    for (const result of results) {
+      if (result.skipped > 0) {
+        anyUnmatched = true
+        unmatchedNotes.push(`${result.file}: ${result.skipped} 块无法匹配 (${result.skippedNotes.join(', ')})`)
+      }
+    }
+  }
+
+  console.log('\n== 应用后状态 ==')
+  printStatus()
+  console.log('client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
+
+  if (!anyUnmatched) return
+
+  // failure menu
+  console.log('\n⚠ 有补丁块在当前 Harness 版本中无法匹配（官方可能已改动这些代码）。')
+  for (const note of unmatchedNotes) console.log('   - ' + note)
+  console.log('\n请选择下一步:')
+  console.log('  [1] 撤销本次应用，恢复原样')
+  console.log('  [2] 升级 Harness（npm 安装最新 @deepseek-ai/dsh），再重跑本工具')
+  console.log('  [3] 升级本补丁模块（等待 dsh-toolbox 发布适配新版本的补丁），再重跑')
+  console.log('  [4] 保持现状退出（未匹配的块保持未打，已打的生效）')
+  const rl = createRl()
+  let choice = '4'
+  try {
+    const ans = await prompt('选择 [1-4]，默认 4: ', rl)
+    if (ans.trim() !== '') choice = ans.trim()
+  } finally {
+    rl.close()
+  }
+  switch (choice) {
+    case '1': {
+      console.log('\n撤销全部补丁...')
+      for (const name of Object.keys(patch.FEATURE_GROUPS)) {
+        const results = await patch.unapplyGroup(dshInstall, name)
+        for (const r of results) {
+          if (r.restored) console.log(`✓ 已撤销: ${name} ${r.file}（从备份恢复）`)
+          else if (r.missingBackup) console.log(`  - ${name} ${r.file}: 无备份（未打过或 Harness 已重装）`)
+        }
+      }
+      console.log('\n已恢复到应用前的原始状态。')
+      break
+    }
+    case '2':
+      console.log('\n升级 Harness:')
+      console.log('  npm i -g @deepseek-ai/dsh@latest')
+      console.log('升级后重新运行 dtb-harness-patch；若新版本仍未验证，工具会提示并可加 --allow-unverified。')
+      break
+    case '3':
+      console.log('\n升级补丁模块:')
+      console.log('  npm i -g @dsh-toolbox/harness-patch@latest   （npm 渠道）')
+      console.log('  或拉取仓库最新代码: git -C ~/develop/dsh-toolbox pull && node packages/harness-patch/bin/dtb-harness-patch.mjs')
+      console.log('升级后重新运行 dtb-harness-patch。')
+      break
+    default:
+      console.log('\n保持现状。未匹配的块保持未打；已应用的块已生效（刷新浏览器 / 重启 Harness）。')
+  }
 }
 
 main().catch((error) => {
