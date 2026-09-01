@@ -8,18 +8,17 @@
  *                  (workspace <-> ungrouped <-> archived), all directions.
  *   resilience   — a corrupt session log must not take the session surface down.
  *
- * Default (no flags) runs an interactive flow:
- *   1. show the current state (one line per file, per group)
- *   2. ask for confirmation before touching anything
- *   3. apply group by group, ticking each patch as it completes
- *   4. on any unmatched block, offer: unapply / upgrade Harness / upgrade
- *      this patch module — the user decides.
+ * Running with no flags starts the interactive flow:
+ *   • TTY terminal: full-screen TUI — status table with live progress bars,
+ *     a footer operation bar ([Enter] apply · [U] unapply · [S] status ·
+ *     [Q] quit), and a failure menu when some blocks cannot match.
+ *   • Non-TTY (pipe/CI): plain text flow — status table, confirmation prompt,
+ *     per-patch ticks, failure menu via numbered input.
  *
  * Non-interactive flags:
  *   --apply <group> / --unapply <group> / --unapply-all / --status
  *   --dsh-install <path> / --allow-unverified / --yes (skip confirmation)
  */
-import { readFileSync } from 'node:fs'
 import readline from 'node:readline'
 import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
@@ -40,6 +39,8 @@ function parseArgs(argv) {
 
 const prompt = (question, rl) => new Promise((resolve) => rl.question(question, resolve))
 const createRl = () => readline.createInterface({ input: process.stdin, output: process.stdout })
+
+const FILE_LABEL = { client: 'client.js', host: 'host index.js', workspace: 'workspace index.js', persistence: 'persistence index.js' }
 
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
@@ -66,32 +67,52 @@ async function main() {
     某块与当前版本不匹配时仅跳过该块并警告，不会中止、不会破坏文件。
   • 修改前备份为 <文件>.dtb-pre-<组>.bak，撤销 = 恢复该备份。
   • 版本检测：已安装 dsh 版本不在已验证列表时警告（可用 --allow-unverified 跳过）。
+  • 全屏 TUI 仅在实际终端生效；管道/CI 自动降级为文本模式。
   • Harness 升级（npm i -g / 重装）后需重跑：先 --unapply-all 或直接重打。`)
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
   const patch = await import('../src/patch.mjs')
 
-  const FILE_LABEL = { client: 'client.js', host: 'host index.js', workspace: 'workspace index.js', persistence: 'persistence index.js' }
+  const checkVersion = () => {
+    const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
+    if (version === null) {
+      console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（继续执行，补丁按逐块字符串匹配，不匹配的块会跳过且不动文件）')
+      return { version: null, supported: false }
+    }
+    if (supported) {
+      console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
+      return { version, supported: true }
+    }
+    if (flags['allow-unverified'] === true) {
+      console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过（不匹配的块仍会安全跳过）`)
+      return { version, supported: false }
+    }
+    console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
+    console.error(`  补丁是逐块字符串替换：未验证版本中官方已改动的块会被跳过（警告），但已改动的目标代码无法识别时不会误改。`)
+    console.error(`  如确认继续，加 --allow-unverified；或先跑 dtb-harness-patch --status 查看各块匹配情况。`)
+    return { version, supported: false, blocked: true }
+  }
 
-  const renderStatus = () => {
+  // ---------- shared status rendering ----------
+  const statusLines = () => {
     const status = patch.groupStatus(dshInstall)
     const lines = []
     for (const s of status) {
       const state = s.patched ? '✓ 已打' : (s.any ? '◐ 已打(部分)' : '· 未打')
       lines.push(`\n${s.name}（${s.label}）[${state}${s.backupExists ? '，有备份' : ''}]`)
       for (const f of s.perFile) {
-        if (f.missing) { lines.push(`    ${FILE_LABEL[f.fileKey] ?? f.fileKey}: 文件缺失`); continue }
+        const label = FILE_LABEL[f.fileKey] ?? f.fileKey
+        if (f.missing) { lines.push(`    ${label}: 文件缺失`); continue }
         const mark = f.applied === 0 && f.skipped === 0 ? '✓' : '·'
-        lines.push(`    ${mark} ${FILE_LABEL[f.fileKey] ?? f.fileKey}: 待应用 ${f.applied} | 已具备 ${f.already} | 无法匹配 ${f.skipped}`)
+        lines.push(`    ${mark} ${label}: 待应用 ${f.applied} | 已具备 ${f.already} | 无法匹配 ${f.skipped}`)
       }
     }
     return lines
   }
-
   const printStatus = () => {
     console.log('== 特性组状态（只读，按序模拟应用后的结果） ==')
-    for (const line of renderStatus()) console.log(line)
+    for (const line of statusLines()) console.log(line)
     console.log()
   }
 
@@ -122,11 +143,8 @@ async function main() {
   }
 
   if (flags.apply !== undefined && flags.apply !== true) {
-    const { version, supported } = patch.checkHarnessVersion(dshInstall)
-    if (!supported && flags['allow-unverified'] !== true && version !== null) {
-      console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表；加 --allow-unverified 强制继续。`)
-      return
-    }
+    const v = checkVersion()
+    if (v.blocked) return
     const results = await patch.applyGroup(dshInstall, flags.apply)
     for (const result of results) {
       if (result.changed) {
@@ -138,21 +156,27 @@ async function main() {
     return
   }
 
-  // ---------------- interactive flow (default) ----------------
-  const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
-  if (version === null) {
-    console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（补丁按逐块字符串匹配，不匹配的块会跳过且不动文件）')
-  } else if (supported) {
-    console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
-  } else if (flags['allow-unverified'] === true) {
-    console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过（不匹配的块仍会安全跳过）`)
+  // ---------------- interactive flow ----------------
+  const v = checkVersion()
+  if (v.blocked) return
+
+  if (process.stdout.isTTY && process.stdin.isTTY && process.env.DSH_PATCH_TUI !== '0') {
+    const tuiFlow = await import('../src/tui-flow.mjs')
+    await tuiFlow.runTuiFlow({ patch, dshInstall, FILE_LABEL, flags })
   } else {
-    console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
-    console.warn('  补丁是逐块字符串替换：未验证版本中官方已改动的块会被跳过（警告），不会误改。')
+    await interactiveText(patch, dshInstall, flags, statusLines)
   }
+}
 
-  printStatus()
 
+/** Plain text interactive flow (non-TTY / CI / DSH_PATCH_TUI=0). */
+async function interactiveText(patch, dshInstall, flags, statusLines) {
+  const printStatusText = () => {
+    console.log('== 特性组状态（只读，按序模拟应用后的结果） ==')
+    for (const line of statusLines()) console.log(line)
+    console.log()
+  }
+  printStatusText()
   let proceed = flags.yes === true
   if (!proceed) {
     const rl = createRl()
@@ -168,7 +192,6 @@ async function main() {
     return
   }
 
-  // apply group by group with live per-patch ticks
   let anyUnmatched = false
   const unmatchedNotes = []
   for (const name of Object.keys(patch.FEATURE_GROUPS)) {
@@ -192,12 +215,11 @@ async function main() {
   }
 
   console.log('\n== 应用后状态 ==')
-  printStatus()
+  printStatusText()
   console.log('client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
 
   if (!anyUnmatched) return
 
-  // failure menu
   console.log('\n⚠ 有补丁块在当前 Harness 版本中无法匹配（官方可能已改动这些代码）。')
   for (const note of unmatchedNotes) console.log('   - ' + note)
   console.log('\n请选择下一步:')
