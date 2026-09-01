@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 /**
- * dtb-harness-patch — apply (or verify) the local resilience patch on the
- * installed DeepSeek Harness: session listing must survive corrupt logs.
- * Idempotent; original preserved at index.js.pre-resilience.bak; every apply
- * is behavior-verified in a fresh process (and rolled back on failure).
- * Re-run after harness upgrades.
+ * dtb-harness-patch — apply, verify, and unapply feature patches on the
+ * installed DeepSeek Harness.
+ *
+ * Two user-visible feature groups:
+ *   session-area — move sessions anywhere in the left sidebar
+ *                  (workspace <-> ungrouped <-> archived), all directions.
+ *   resilience   — a corrupt session log must not take the session surface down.
+ *
+ * Applying is declarative per block: official builds that already include a
+ * change are detected and skipped; only genuinely missing changes are applied.
+ * Group-level backups allow clean unapply.
  *
  * Usage:
- *   dtb-harness-patch [--dsh-install <path>]          resilience patch
- *   dtb-harness-patch --workspace-live [--dsh-install <path>]   live cross-workspace move
+ *   dtb-harness-patch                    apply all feature groups (default)
+ *   dtb-harness-patch --apply <group>    apply one group
+ *   dtb-harness-patch --unapply <group>  restore one group from backup
+ *   dtb-harness-patch --unapply-all      restore every group from backup
+ *   dtb-harness-patch --status           show per-group state (no changes)
+ *   dtb-harness-patch --dsh-install <path>   explicit install root
+ *   dtb-harness-patch --allow-unverified     skip the version check
  */
 import { findDshInstall } from '@dsh-toolbox/core/src/harness.mjs'
 
@@ -30,200 +41,112 @@ function parseArgs(argv) {
 async function main() {
   const flags = parseArgs(process.argv.slice(2))
   if (flags.help === true || flags['-h'] === true) {
-    console.log(`dtb-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打本地补丁
+    console.log(`dtb-harness-patch — DeepSeek Harness 工具集（dsh-toolbox）· 给已安装的 Harness 打特性补丁
 
 用法（推荐）:
-  dtb-harness-patch                   一条命令应用全部补丁（幂等，升级 Harness 后重跑）
-  dtb-harness-patch --all             同上（显式）
+  dtb-harness-patch                   应用全部特性组（幂等，升级 Harness 后重跑）
+  dtb-harness-patch --apply <组>      只应用一个组（session-area / resilience）
+  dtb-harness-patch --unapply <组>    撤销一个组（从组级备份恢复）
+  dtb-harness-patch --unapply-all     撤销全部组
+  dtb-harness-patch --status          查看各组状态（不改动文件）
+  dtb-harness-patch --allow-unverified  跳过版本检测
 
-版本检测:
-  运行时会读取已安装 @deepseek-ai/dsh 的版本，与已验证版本列表对比；
-  不在列表中时中止（补丁是精确字符串替换，未验证版本可能已改动匹配块）。
-  确认要尝试时加 --allow-unverified 跳过检查。
-
-高级（单独重打某一项，一般不需要）:
-  --workspace-live / --workspace-live-v2 / --ungrouped-detach / --blue-bar
-  --new-session-anchor / --ungrouped-anchor / --blank-visible
-  --detach-payload-fix / --move-error-clarity / --workspace-bundle
-  --move-live-safe
+特性组:
+  session-area  会话区管理：左侧边栏任意移动会话（工作区 ↔ 未分组 ↔ 归档，全向）
+  resilience    会话历史韧性：一个坏日志不再拖垮会话列表
 
 说明:
-  • 幂等：已打过则直接跳过；修改前备份原文件。
-  • 韧性补丁每次应用都在全新进程里做行为验证，失败自动回滚。
-  • workspace-live：host 侧 insertSessionBefore 自动挂账（header cwd 匹配时），
-    客户端支持把会话（含"未分组"）拖到工作区行实现实时移动。
-  • Harness 升级（npm i -g / 重装）后需重跑对应命令。`)
+  • 逐块声明式：官方版本已包含的修改自动识别并跳过，只补真正缺失的块；
+    某块与当前版本不匹配时仅跳过该块并警告，不会中止、不会破坏文件。
+  • 修改前备份为 <文件>.dtb-pre-<组>.bak，撤销 = 恢复该备份。
+  • 版本检测：已安装 dsh 版本不在已验证列表时警告（可用 --allow-unverified 跳过）。
+  • Harness 升级（npm i -g / 重装）后需重跑：先 --unapply-all 或直接重打。`)
     return
   }
   const dshInstall = findDshInstall(flags['dsh-install'])
   const patch = await import('../src/patch.mjs')
-  const applyAll = async () => {
-    // Version gate: the patches are exact string replacements, so a harness
-    // version we have not validated may have changed the matching blocks.
+
+  const checkVersion = () => {
     const { version, supported, supportedVersions } = patch.checkHarnessVersion(dshInstall)
     if (version === null) {
-      console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（继续执行，补丁将按字符串匹配，任一不匹配即中止且不改动文件）')
-    } else if (supported) {
+      console.warn('⚠ 版本检测: 无法读取 dsh 的 package.json（继续执行，补丁按逐块字符串匹配，不匹配的块会跳过且不动文件）')
+      return true
+    }
+    if (supported) {
       console.log(`✓ 版本检测: @deepseek-ai/dsh ${version}（已在此版本验证过）`)
-    } else if (flags['allow-unverified'] === true) {
-      console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过检查（补丁仍按字符串匹配，任一不匹配即中止且不改动文件）`)
-    } else {
-      console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
-      console.error(`  补丁是精确字符串替换，未验证的版本可能已改动匹配块（如 v8 的 session.create 载荷）。`)
-      console.error(`  如果你确认要尝试，请加 --allow-unverified 跳过此检查；任一匹配块不匹配时补丁会中止且不改动文件。`)
-      process.exitCode = 1
-      return
+      return true
     }
-    const steps = [
-      ['韧性补丁', () => patch.applyResiliencePatch(dshInstall)],
-      ['workspace-live(v1)', () => patch.applyWorkspaceLivePatch(dshInstall)],
-      ['workspace-live-v2', () => patch.applyWorkspaceLivePatchV2(dshInstall)],
-      ['ungrouped-detach(v3)', () => patch.applyUngroupedDetachPatch(dshInstall)],
-      ['blue-bar(v4)', () => patch.applyBlueBarDragPatch(dshInstall)],
-      ['new-session-anchor(v5)', () => patch.applyUngroupedNewSessionPatch(dshInstall)],
-      ['ungrouped-anchor(v6)', () => patch.applyUngroupedAnchorPatch(dshInstall)],
-      ['blank-visible(v7)', () => patch.applyUngroupedBlankVisiblePatch(dshInstall)],
-      ['detach-payload-fix(v8)', () => patch.applyDetachPayloadFix(dshInstall)],
-      ['move-error-clarity(v9)', () => patch.applyMoveErrorClarityPatch(dshInstall)],
-      ['workspace-bundle host(v10)', () => patch.applyWorkspaceBundleHostPatch(dshInstall)],
-      ['workspace-bundle client(v11)', () => patch.applyWorkspaceBundleClientPatch(dshInstall)],
-      ['archived-label(v12)', () => patch.applyArchivedLabelPatch(dshInstall)],
-      ['move-persistence-fix(v13)', () => patch.applyMovePersistenceFix(dshInstall)],
-      ['empty-drop-row(v14)', () => patch.applyEmptyDropRowPatch(dshInstall)],
-      ['hover-placeholder(v15)', () => patch.applyHoverPlaceholderPatch(dshInstall)],
-      ['hover-session-id(v16)', () => patch.applyHoverSessionIdPatch(dshInstall)],
-      ['move-live-safe(v16)', () => patch.applyMoveLiveSafePatch(dshInstall)],
-    ]
-    for (const [label, fn] of steps) {
-      try {
-        const results = await fn()
-        const list = Array.isArray(results) ? results : [results]
-        for (const result of list) {
-          if (result.alreadyPatched === true) console.log('✓ 已应用过:', label)
-          else console.log('✓ 已应用:', label, result.file ?? result.target)
-        }
-      } catch (error) {
-        console.error('✗ 失败:', label, '-', error.message)
-        process.exitCode = 1
-        return
+    if (flags['allow-unverified'] === true) {
+      console.warn(`⚠ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中；--allow-unverified 已跳过（不匹配的块仍会安全跳过）`)
+      return true
+    }
+    console.error(`✗ 版本检测: @deepseek-ai/dsh ${version} 不在已验证列表 [${supportedVersions.join(', ')}] 中。`)
+    console.error(`  补丁是逐块字符串替换：未验证版本中官方已改动的块会被跳过（警告），但已改动的目标代码无法识别时不会误改。`)
+    console.error(`  如确认继续，加 --allow-unverified；或先跑 dtb-harness-patch --status 查看各块匹配情况。`)
+    return false
+  }
+
+  const applyGroup = async (name) => {
+    const results = await patch.applyGroup(dshInstall, name)
+    for (const result of results) {
+      if (result.changed) {
+        console.log(`✓ 已应用: ${name} ${result.file}`)
+        console.log(`    备份: ${result.backup}  （${result.applied} 块应用，${result.already} 块已具备，${result.skipped} 块跳过）`)
+      } else if (result.alreadyPatched) {
+        console.log(`✓ 已应用过: ${name} ${result.file}（${result.already} 块已具备，${result.skipped} 块跳过）`)
       }
     }
-    console.log('\n全部补丁已应用。client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
   }
-  if (flags.all === true || Object.keys(flags).filter((k) => k !== 'dsh-install' && k !== 'all' && k !== 'help' && k !== 'allow-unverified').length === 0) {
-    await applyAll()
-    return
-  }
-  if (flags['workspace-live'] === true) {
-    const results = await applyWorkspaceLivePatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
+
+  if (flags.status === true) {
+    console.log('== 特性组状态（只读） ==')
+    for (const s of patch.groupStatus(dshInstall)) {
+      const parts = s.perFile.map((f) => f.missing
+        ? `${f.fileKey}: 文件缺失`
+        : `${f.fileKey}: 补丁 ${f.markers} | 就绪块 ${f.ready} | 漂移块 ${f.drifted}`).join(' | ')
+      const state = s.patched ? '已打' : (s.any ? '部分' : '未打')
+      console.log(`  ${s.name}（${s.label}）[${state}${s.backupExists ? '，有备份' : ''}]\n    ${parts}`)
     }
-    console.log('注意: 正在运行的 Harness 内存中仍是旧模块/旧界面，重启后生效；此后跨工作区拖拽即可实时移动会话。')
     return
   }
-  if (flags['workspace-live-v2'] === true) {
-    const results = await applyWorkspaceLivePatchV2(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用 v2:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: v2 需要先应用 v1；刷新浏览器即可看到高亮与实时更新（无需重启）。')
-    return
-  }
-  if (flags['ungrouped-detach'] === true) {
-    const results = await applyUngroupedDetachPatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 需要先应用 workspace-live（v1）。host 侧需重启 Harness；刷新浏览器后未分组桶会常驻显示，可把工作区里的会话拖进未分组。')
-    return
-  }
-  if (flags['blue-bar'] === true) {
-    const results = await applyBlueBarDragPatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 需要先应用 workspace-live(v1)/ungrouped-detach(v3)。刷新浏览器即可——拖拽会话跨组时显示蓝色插入条，落点即插入位置。')
-    return
-  }
-  if (flags['new-session-anchor'] === true) {
-    const results = await applyUngroupedNewSessionPatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 刷新浏览器即可——未分组桶下出现"＋ 新会话"锚点（点击创建未分组会话，也是拖拽落点）。')
-    return
-  }
-  if (flags['ungrouped-anchor'] === true) {
-    const results = await applyUngroupedAnchorPatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 需要先应用 new-session-anchor(v5)。刷新浏览器即可——未分组桶空时会自动常驻一个空会话（可点开使用，也是拖拽落点）。')
-    return
-  }
-  if (flags['blank-visible'] === true) {
-    const results = await applyUngroupedBlankVisiblePatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 刷新浏览器即可——未分组桶现在会显示空会话（默认是被隐藏的），既有锚点也可见。')
-    return
-  }
-  if (flags['detach-payload-fix'] === true) {
-    const results = await applyDetachPayloadFix(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 修复 rpc.call 载荷封装（去掉 {args:...} 包装）。刷新浏览器即可。')
-    return
-  }
-  if (flags['move-error-clarity'] === true) {
-    const results = await patch.applyMoveErrorClarityPatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup)
-    }
-    console.log('注意: 刷新浏览器即可——跨目录移动失败时会说明会话工作目录与目标工作区路径的差异。')
-    return
-  }
-  if (flags['workspace-bundle'] === true) {
-    for (const fn of [() => patch.applyWorkspaceBundleHostPatch(dshInstall), () => patch.applyWorkspaceBundleClientPatch(dshInstall)]) {
-      const results = await fn()
-      for (const result of results) {
-        if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-        else console.log('已应用:', result.file, '\n  备份:', result.backup)
+
+  if (flags['unapply-all'] === true) {
+    for (const name of Object.keys(patch.FEATURE_GROUPS)) {
+      const results = await patch.unapplyGroup(dshInstall, name)
+      for (const r of results) {
+        if (r.restored) console.log(`✓ 已撤销: ${name} ${r.file}（从备份恢复）`)
+        else if (r.missingBackup) console.log(`  - ${name} ${r.file}: 无备份（未打过或 Harness 已重装）`)
       }
     }
-    console.log('注意: 归档文件夹/拖拽解除归档需刷新浏览器；unarchive/跨目录移动 RPC 需重启一次 Harness。')
+    console.log('\n已恢复。client 补丁刷新浏览器即生效；host 补丁需重启一次 Harness。')
     return
   }
-  if (flags['move-live-safe'] === true) {
-    const results = await patch.applyMoveLiveSafePatch(dshInstall)
-    for (const result of results) {
-      if (result.alreadyPatched === true) console.log('已应用过:', result.file)
-      else console.log('已应用:', result.file, '\n  备份:', result.backup, '\n  校验:', result.verified)
+
+  if (flags.unapply !== undefined && flags.unapply !== true) {
+    const results = await patch.unapplyGroup(dshInstall, flags.unapply)
+    let any = false
+    for (const r of results) {
+      if (r.restored) { console.log(`✓ 已撤销: ${flags.unapply} ${r.file}（从备份恢复）`); any = true }
+      else if (r.missingBackup) console.log(`  - ${flags.unapply} ${r.file}: 无备份（未打过或 Harness 已重装）`)
     }
-    console.log('注意: 需重启一次 Harness 生效。此后：跨目录移动会拒绝"正在打开"的会话（先切换到别的会话/重启再移动），并且移动失败会原子回滚，不再产生半搬状态。')
+    if (!any) console.log(`\n${flags.unapply} 无备份可恢复。`)
+    else console.log(`\n${flags.unapply} 已撤销。刷新浏览器 / 重启 Harness 生效。`)
     return
   }
-  const result = await patch.applyResiliencePatch(dshInstall)
-  if (result.alreadyPatched === true) {
-    console.log('补丁已应用过，无需重复。', result.target)
-  } else {
-    console.log('补丁已应用:', result.target)
-    console.log('备份:', result.backup)
-    console.log(result.verified)
-    console.log('注意: 正在运行的 Harness 内存中仍是旧模块，重启后生效。')
+
+  if (flags.apply !== undefined && flags.apply !== true) {
+    if (!checkVersion()) return
+    await applyGroup(flags.apply)
+    console.log(`\n${flags.apply} 已处理。client 补丁刷新浏览器即生效；host 补丁需重启一次 Harness。`)
+    return
   }
+
+  // default: apply all groups
+  if (!checkVersion()) return
+  for (const name of Object.keys(patch.FEATURE_GROUPS)) {
+    await applyGroup(name)
+  }
+  console.log('\n全部特性组已处理。client 补丁刷新浏览器即生效；host 补丁（韧性、attach/detach、unarchive、跨目录移动）需重启一次 Harness。')
 }
 
 main().catch((error) => {

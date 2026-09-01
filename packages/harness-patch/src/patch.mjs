@@ -160,37 +160,8 @@ const NEW_BLOCK = `	async list(signal) {
 	}`
 
 /** Apply the resilience patch to one dsh install; returns a status object. */
-export async function applyResiliencePatch(dshInstall) {
-  const target = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-session-persistence-jsonl', 'lib', 'index.js')
-  if (!existsSync(target)) throw new Error(`installed persistence lib not found: ${target}`)
-  const original = readFileSync(target, 'utf8')
-  if (original.includes(MARKER)) {
-    return { alreadyPatched: true, target }
-  }
-  if (!original.includes(OLD_BLOCK)) {
-    throw new Error('the installed lib does not match the expected listing block — the build changed; aborting without touching it')
-  }
-  const backup = `${target}.pre-resilience.bak`
-  if (!existsSync(backup)) copyFileSync(target, backup)
-  writeFileSync(target, original.replace(OLD_BLOCK, NEW_BLOCK))
+/* (legacy entry point removed: applyResiliencePatch) */
 
-  // Behavioral verification in a fresh process against a fixture root.
-  const probeDir = mkdtempSync(join(tmpdir(), 'dsh-toolbox-patch-probe-'))
-  try {
-    const probe = buildProbe(dshInstall, target)
-    const probeFile = join(probeDir, 'probe.mjs')
-    writeFileSync(probeFile, probe)
-    const { spawnSync } = await import('node:child_process')
-    const result = spawnSync(process.execPath, [probeFile], { encoding: 'utf8' })
-    if (result.status !== 0) {
-      copyFileSync(backup, target)
-      throw new Error(`patch verification failed; rolled back.\n${result.stderr || result.stdout}`)
-    }
-    return { applied: true, backup, target, verified: result.stdout.trim() }
-  } finally {
-    rmSync(probeDir, { recursive: true, force: true })
-  }
-}
 
 function buildProbe(dshInstall, target) {
   const url = pathToFileURL(target).href
@@ -307,43 +278,8 @@ const CLIENT_DROP_NEW = `								onDragOver: (workspaceDrag === null && drag ===
  *    ungrouped bucket) onto a workspace row now calls insertSessionBefore.
  * Idempotent; both files backed up; re-apply after harness upgrades.
  */
-export async function applyWorkspaceLivePatch(dshInstall) {
-  const hostTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  const results = []
-  for (const target of [hostTarget, clientTarget]) {
-    if (!existsSync(target)) throw new Error(`workspace-live target not found: ${target}`)
-  }
-  const hostOriginal = readFileSync(hostTarget, 'utf8')
-  if (!hostOriginal.includes(WORKSPACE_LIVE_MARKER)) {
-    if (!hostOriginal.includes(HOST_OLD)) {
-      throw new Error(`host apiproxy build changed; workspace-live host patch aborted without touching ${hostTarget}`)
-    }
-    const backup = `${hostTarget}.pre-workspace-live.bak`
-    if (!existsSync(backup)) copyFileSync(hostTarget, backup)
-    writeFileSync(hostTarget, hostOriginal.replace(HOST_OLD, HOST_NEW))
-    results.push({ file: hostTarget, backup, changed: true })
-  } else {
-    results.push({ file: hostTarget, alreadyPatched: true })
-  }
+/* (legacy entry point removed: applyWorkspaceLivePatch) */
 
-  const clientOriginal = readFileSync(clientTarget, 'utf8')
-  if (!clientOriginal.includes(WORKSPACE_LIVE_MARKER)) {
-    if (!clientOriginal.includes(CLIENT_INSERT_OLD) || !clientOriginal.includes(CLIENT_DROP_OLD)) {
-      throw new Error(`client build changed; workspace-live client patch aborted without touching ${clientTarget}`)
-    }
-    const backup = `${clientTarget}.pre-workspace-live.bak`
-    if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-    let next = clientOriginal
-    next = next.replace(CLIENT_INSERT_OLD, CLIENT_INSERT_NEW)
-    next = next.replace(CLIENT_DROP_OLD, CLIENT_DROP_NEW)
-    writeFileSync(clientTarget, next)
-    results.push({ file: clientTarget, backup, changed: true })
-  } else {
-    results.push({ file: clientTarget, alreadyPatched: true })
-  }
-  return results
-}
 
 // --- workspace-live v2: drop feedback + live list update --------------------
 
@@ -448,39 +384,8 @@ const V2_REFRESH_NEW = `				insertSessionBefore: async (workspaceId, sessionId, 
  * after a successful move (so the result is visible immediately, no page
  * refresh), a visible alert on failure, and marker cleanup on drag start/end.
  */
-export async function applyWorkspaceLivePatchV2(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`workspace-live v2 target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(WORKSPACE_LIVE_V2_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (!original.includes('const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {')) {
-    throw new Error('workspace-live v1 is not applied; run --workspace-live first')
-  }
-  const pairs = [
-    [V2_STATE_OLD, V2_STATE_NEW],
-    [V2_COMMIT_OLD, V2_COMMIT_NEW],
-    [V2_CLASS_OLD, V2_CLASS_NEW],
-    [V2_DRAGOVER_OLD, V2_DRAGOVER_NEW],
-    [V2_DRAGSTART_OLD, V2_DRAGSTART_NEW],
-    [V2_DRAGEND_OLD, V2_DRAGEND_NEW],
-    [V2_REFRESH_OLD, V2_REFRESH_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('workspace-live v2: a v1 text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-workspace-live-v2.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  // marker: annotate the v2 commit function so idempotence is content-based
-  writeFileSync(clientTarget, next.replace(
-    'const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {',
-    `// dsh-toolbox workspace-live-v2\n\t\t\tconst commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {`,
-  ))
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyWorkspaceLivePatchV2) */
+
 
 // --- ungrouped detach patch (v3): drag sessions OUT of workspaces -----------
 
@@ -643,64 +548,8 @@ const DETACH_CLIENT_INJECT_NEW = `				insertSessionBefore: async (workspaceId, s
  *    dropping a workspace session on it calls detach + refresh; the drop
  *    highlight is keyed by group so the ungrouped row lights up too.
  */
-export async function applyUngroupedDetachPatch(dshInstall) {
-  const hostTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  for (const target of [hostTarget, clientTarget]) {
-    if (!existsSync(target)) throw new Error(`ungrouped-detach target not found: ${target}`)
-  }
-  const results = []
+/* (legacy entry point removed: applyUngroupedDetachPatch) */
 
-  const hostOriginal = readFileSync(hostTarget, 'utf8')
-  if (!hostOriginal.includes(DETACH_MARKER)) {
-    const hostPairs = [
-      [DETACH_HOST_CMD_OLD, DETACH_HOST_CMD_NEW],
-      [DETACH_HOST_SCHEMA_OLD, DETACH_HOST_SCHEMA_NEW],
-      [DETACH_HOST_REGISTRY_OLD, DETACH_HOST_REGISTRY_NEW],
-      [DETACH_HOST_VALUE_MAP_OLD, DETACH_HOST_VALUE_MAP_NEW],
-    ]
-    for (const [oldText] of hostPairs) {
-      if (!hostOriginal.includes(oldText)) throw new Error('ungrouped-detach: host build changed; aborting')
-    }
-    const backup = `${hostTarget}.pre-ungrouped-detach.bak`
-    if (!existsSync(backup)) copyFileSync(hostTarget, backup)
-    let next = hostOriginal
-    for (const [oldText, newText] of hostPairs) next = next.replace(oldText, newText)
-    writeFileSync(hostTarget, next)
-    results.push({ file: hostTarget, backup, changed: true })
-  } else {
-    results.push({ file: hostTarget, alreadyPatched: true })
-  }
-
-  const clientOriginal = readFileSync(clientTarget, 'utf8')
-  if (!clientOriginal.includes(DETACH_MARKER)) {
-    if (!clientOriginal.includes('const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {')) {
-      throw new Error('ungrouped-detach: workspace-live v1 is not applied; run --workspace-live first')
-    }
-    const clientPairs = [
-      [DETACH_CLIENT_STRAY_OLD, DETACH_CLIENT_STRAY_NEW],
-      [DETACH_CLIENT_MARKER_OLD, DETACH_CLIENT_MARKER_NEW],
-      [DETACH_CLIENT_DROP_OLD, DETACH_CLIENT_DROP_NEW],
-      [DETACH_CLIENT_UNGROUPED_FN_OLD, DETACH_CLIENT_UNGROUPED_FN_NEW],
-      [DETACH_CLIENT_ST_PROPS_OLD, DETACH_CLIENT_ST_PROPS_NEW],
-      [DETACH_CLIENT_WB_PROPS_OLD, DETACH_CLIENT_WB_PROPS_NEW],
-      [DETACH_CLIENT_WB_RENDER_OLD, DETACH_CLIENT_WB_RENDER_NEW],
-      [DETACH_CLIENT_INJECT_OLD, DETACH_CLIENT_INJECT_NEW],
-    ]
-    for (const [oldText] of clientPairs) {
-      if (!clientOriginal.includes(oldText)) throw new Error('ungrouped-detach: a client text block no longer matches; aborting')
-    }
-    const backup = `${clientTarget}.pre-ungrouped-detach.bak`
-    if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-    let next = clientOriginal
-    for (const [oldText, newText] of clientPairs) next = next.replace(oldText, newText)
-    writeFileSync(clientTarget, next)
-    results.push({ file: clientTarget, backup, changed: true })
-  } else {
-    results.push({ file: clientTarget, alreadyPatched: true })
-  }
-  return results
-}
 
 // --- blue-bar cross-group drag (v4): insertion bar, not highlight -----------
 
@@ -863,41 +712,8 @@ const B4_CLASS_NEW = `sessionDropMarker !== null && sessionDropMarker.id === gro
  *  - header drops use the bar too (before/after the group header row)
  * Requires v1+v2+v3.
  */
-export async function applyBlueBarDragPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`blue-bar target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(BLUEBAR_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (!original.includes('const commitSessionCrossGroupDrag')) {
-    // v3 must be present (it adds commitSessionToUngroupedDrag's detach block)
-    if (!original.includes('detachSession(owner.workspaceId, activeDrag.sessionId)')) {
-      throw new Error('blue-bar: ungrouped-detach (v3) is not applied; run --ungrouped-detach first')
-    }
-  }
-  const pairs = [
-    [B4_HOVER_OLD, B4_HOVER_NEW],
-    [B4_MARKER_OLD, B4_MARKER_NEW],
-    [B4_DROP_OLD, B4_DROP_NEW],
-    [B4_END_OLD, B4_END_NEW],
-    [B4_ROWGATE_OLD, B4_ROWGATE_NEW],
-    [B4_UNGROUPED_FN_OLD, B4_UNGROUPED_FN_NEW],
-    [B4_GROUPOVER_OLD, B4_GROUPOVER_NEW],
-    [B4_CLASS_OLD, B4_CLASS_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('blue-bar: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-blue-bar.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('const commitSessionCrossGroupDrag = (activeDrag, over) => {',
-    `// dsh-toolbox blue-bar-drag\n\t\t\tconst commitSessionCrossGroupDrag = (activeDrag, over) => {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyBlueBarDragPatch) */
+
 
 // --- ungrouped new-session anchor (v5): create + drop anchor under ungrouped
 
@@ -990,33 +806,8 @@ const N5_INJECT_NEW = `				detachSession: async (workspaceId, sessionId) => {
  * a drop anchor — dragging a workspace session onto it detaches it into
  * ungrouped, with the blue-bar feedback. Requires v1-v4.
  */
-export async function applyUngroupedNewSessionPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`ungrouped-new-session target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(NEWSESSION_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  const pairs = [
-    [N5_CREATE_OLD, N5_CREATE_NEW],
-    [N5_ANCHOR_OLD, N5_ANCHOR_NEW],
-    [N5_ST_PROPS_OLD, N5_ST_PROPS_NEW],
-    [N5_WB_PROPS_OLD, N5_WB_PROPS_NEW],
-    [N5_RENDER_OLD, N5_RENDER_NEW],
-    [N5_INJECT_OLD, N5_INJECT_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('ungrouped-new-session: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-ungrouped-new-session.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('createUngroupedSession: async () => {',
-    `// dsh-toolbox ungrouped-new-session\n\t\t\t\tcreateUngroupedSession: async () => {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyUngroupedNewSessionPatch) */
+
 
 // --- ungrouped anchor v6: a persistent empty session, not a button ----------
 
@@ -1106,33 +897,8 @@ const A6_EFFECT_NEW = `			const ungroupedSessionIds = (0, react.useMemo)(() => {
  * it is a real session row, so dragging a workspace session onto it detaches
  * into ungrouped with the blue-bar feedback. Requires v5 (new-session-anchor).
  */
-export async function applyUngroupedAnchorPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`ungrouped-anchor target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(ANCHOR6_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (!original.includes('＋ 新会话') || !original.includes('createUngroupedSession: async')) {
-    throw new Error('ungrouped-anchor: new-session-anchor (v5) is not applied; run --new-session-anchor first')
-  }
-  const pairs = [
-    [A6_REMOVE_BUTTON_OLD, A6_REMOVE_BUTTON_NEW],
-    [A6_CREATE_OLD, A6_CREATE_NEW],
-    [A6_EFFECT_OLD, A6_EFFECT_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('ungrouped-anchor: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-ungrouped-anchor.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('const ungroupedAnchorRef = (0, react.useRef)(false);',
-    `// dsh-toolbox ungrouped-anchor\n\t\t\tconst ungroupedAnchorRef = (0, react.useRef)(false);`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyUngroupedAnchorPatch) */
+
 
 // --- ungrouped blank-visible (v7): blank sessions show under ungrouped ------
 
@@ -1154,19 +920,8 @@ const B7_STRAY_NEW = `			// dsh-toolbox ungrouped-blank-visible: blank (empty) s
  * any auto-created one were invisible and the bucket had no anchor. Blank
  * sessions remain hidden inside workspace buckets (default behavior).
  */
-export async function applyUngroupedBlankVisiblePatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`ungrouped-blank-visible target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(BLANKVISIBLE_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (!original.includes(B7_STRAY_OLD)) {
-    throw new Error('ungrouped-blank-visible: the stray filter no longer matches; aborting without touching the bundle')
-  }
-  const backup = `${clientTarget}.pre-ungrouped-blank-visible.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(B7_STRAY_OLD, B7_STRAY_NEW))
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyUngroupedBlankVisiblePatch) */
+
 
 // --- harness version detection ----------------------------------------------
 
@@ -1221,29 +976,8 @@ const F8_CREATE_NEW = `					const result = await ctx.get("connection").rpc.call(
  * "invalid payload for workspace.detachSession"; the same wrapper silently
  * dropped `cwd` on session.create.
  */
-export async function applyDetachPayloadFix(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`detach-payload-fix target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(DETACHFIX_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  // Each block is matched and replaced independently: newer harness builds may
-  // already ship one of the bare-payload calls (e.g. session.create), so a
-  // missing block is skipped instead of aborting the whole patch.
-  const pairs = []
-  if (original.includes(F8_DETACH_OLD)) pairs.push([F8_DETACH_OLD, F8_DETACH_NEW])
-  if (original.includes(F8_CREATE_OLD)) pairs.push([F8_CREATE_OLD, F8_CREATE_NEW])
-  if (pairs.length === 0) {
-    throw new Error('detach-payload-fix: no rpc.call block matches; the bundled client already sends bare payloads (or the code shape changed)')
-  }
-  const backup = `${clientTarget}.pre-detach-payload-fix.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('detachSession: async (workspaceId, sessionId) => {',
-    `// dsh-toolbox detach-payload-fix\n\t\t\t\tdetachSession: async (workspaceId, sessionId) => {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyDetachPayloadFix) */
+
 
 // --- clear cross-directory move error (v9) ---------------------------------
 
@@ -1301,30 +1035,8 @@ const M9_CATCH2_NEW = `				insertSessionBefore(targetKey, activeDrag.sessionId, 
  * the target workspace path and explains the model, instead of a bare
  * workspace-move-invalid message.
  */
-export async function applyMoveErrorClarityPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`move-error-clarity target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(MOVERR_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  const pairs = [
-    [M9_HELPER_OLD, M9_HELPER_NEW],
-    [M9_CATCH1_OLD, M9_CATCH1_NEW],
-    [M9_CATCH2_OLD, M9_CATCH2_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('move-error-clarity: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-move-error-clarity.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('const workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {',
-    `// dsh-toolbox move-error-clarity\n\t\t\tconst workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyMoveErrorClarityPatch) */
+
 
 // --- workspace bundle host patch (v10): unarchive + cross-directory move -----
 
@@ -1580,47 +1292,8 @@ const W10_VALUEMAP_NEW = `	"workspace.archiveSession": workspaceArchiveSessionVa
  *    events untouched), keeps a .pre-move backup, verifies before removing
  *    the old artifact, and updates workspace accounting (detach + attach).
  */
-export async function applyWorkspaceBundleHostPatch(dshInstall) {
-  const wsTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-workspace', 'lib', 'index.js')
-  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
-  for (const target of [wsTarget, apiTarget]) {
-    if (!existsSync(target)) throw new Error(`workspace-bundle target not found: ${target}`)
-  }
-  const results = []
-  const wsOriginal = readFileSync(wsTarget, 'utf8')
-  if (!wsOriginal.includes('unarchiveSession(sessionId)')) {
-    if (!wsOriginal.includes(W10_WORKSPACE_OLD)) throw new Error('workspace-bundle: dsh-workspace build changed; aborting')
-    const backup = `${wsTarget}.pre-workspace-bundle.bak`
-    if (!existsSync(backup)) copyFileSync(wsTarget, backup)
-    writeFileSync(wsTarget, wsOriginal.replace(W10_WORKSPACE_OLD, W10_WORKSPACE_NEW))
-    results.push({ file: wsTarget, backup, changed: true })
-  } else {
-    results.push({ file: wsTarget, alreadyPatched: true })
-  }
+/* (legacy entry point removed: applyWorkspaceBundleHostPatch) */
 
-  const apiOriginal = readFileSync(apiTarget, 'utf8')
-  if (!apiOriginal.includes(WSBUNDLE_MARKER)) {
-    const pairs = [
-      [W10_CMD_OLD, W10_CMD_NEW],
-      [W10_SCHEMA_OLD, W10_SCHEMA_NEW],
-      [W10_REGISTRY_OLD, W10_REGISTRY_NEW],
-      [W10_VALUEMAP_OLD, W10_VALUEMAP_NEW],
-    ]
-    for (const [oldText] of pairs) {
-      if (!apiOriginal.includes(oldText)) throw new Error('workspace-bundle: host apiproxy build changed; aborting')
-    }
-    const backup = `${apiTarget}.pre-workspace-bundle.bak`
-    if (!existsSync(backup)) copyFileSync(apiTarget, backup)
-    let next = apiOriginal
-    for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-    next = next.replace('async unarchiveSession(request) {', `// dsh-toolbox workspace-bundle\n\t\t\tasync unarchiveSession(request) {`)
-    writeFileSync(apiTarget, next)
-    results.push({ file: apiTarget, backup, changed: true })
-  } else {
-    results.push({ file: apiTarget, alreadyPatched: true })
-  }
-  return results
-}
 
 // --- workspace bundle client patch (v11): archived folder + unarchive drag ---
 
@@ -1888,38 +1561,8 @@ const W11_INJECT_NEW = `				createUngroupedSession: async (options = {}) => {
  *    and call workspace.moveSessionToWorkspace)
  *  - dropping a session onto the archived folder archives it
  */
-export async function applyWorkspaceBundleClientPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`workspace-bundle-client target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(WSBUNDLE_CLIENT_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  const pairs = [
-    [W11_GROUP_OLD, W11_GROUP_NEW],
-    [W11_CREATE_OLD, W11_CREATE_NEW],
-    [W11_DROP_OLD, W11_DROP_NEW],
-    [W11_ARCHIVE_FN_OLD, W11_ARCHIVE_FN_NEW],
-    [W11_WSDRAG_OLD, W11_WSDRAG_NEW],
-    [W11_UNGROUPED_OLD, W11_UNGROUPED_NEW],
-    [W11_CROSS_OLD, W11_CROSS_NEW],
-    [W11_ST_PROPS_OLD, W11_ST_PROPS_NEW],
-    [W11_WB_PROPS_OLD, W11_WB_PROPS_NEW],
-    [W11_RENDER_OLD, W11_RENDER_NEW],
-    [W11_INJECT_OLD, W11_INJECT_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('workspace-bundle-client: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-workspace-bundle-client.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('const commitSessionToArchiveDrag = (activeDrag) => {',
-    `// dsh-toolbox workspace-bundle-client\n\t\t\tconst commitSessionToArchiveDrag = (activeDrag) => {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyWorkspaceBundleClientPatch) */
+
 
 // --- archived folder label fix (v12): it showed as "未分组" ----------------
 
@@ -1935,21 +1578,8 @@ const W12_LABEL_NEW = `			const label = row.workspaceId === void 0 ? (row.key ==
  * workspace-bundle patch, producing two "未分组" sections. The archived
  * folder now shows "归档".
  */
-export async function applyArchivedLabelPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`archived-label target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(ARCHLABEL_MARKER) || original.includes(W12_LABEL_NEW)) {
-    return [{ file: clientTarget, alreadyPatched: true }]
-  }
-  if (!original.includes(W12_LABEL_OLD)) {
-    throw new Error('archived-label: the label line no longer matches; aborting without touching the bundle')
-  }
-  const backup = `${clientTarget}.pre-archived-label.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(W12_LABEL_OLD, W12_LABEL_NEW))
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyArchivedLabelPatch) */
+
 
 // --- moveSessionToWorkspace persistence fix (v13) ---------------------------
 
@@ -1966,21 +1596,8 @@ const W13_NEW = `				const persistence = ctx.get("sessionPersistence");`
  * inject list. Session-controller uses ctx.get("sessionPersistence"); do the
  * same so cross-directory moves actually run.
  */
-export async function applyMovePersistenceFix(dshInstall) {
-  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
-  if (!existsSync(apiTarget)) throw new Error(`move-persistence-fix target not found: ${apiTarget}`)
-  const original = readFileSync(apiTarget, 'utf8')
-  if (original.includes(MOVEPERSIST_MARKER) || original.includes(W13_NEW)) {
-    return [{ file: apiTarget, alreadyPatched: true }]
-  }
-  if (!original.includes(W13_OLD)) {
-    throw new Error('move-persistence-fix: the persistence access line no longer matches; aborting')
-  }
-  const backup = `${apiTarget}.pre-move-persistence-fix.bak`
-  if (!existsSync(backup)) copyFileSync(apiTarget, backup)
-  writeFileSync(apiTarget, original.replace(W13_OLD, W13_NEW))
-  return [{ file: apiTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyMovePersistenceFix) */
+
 
 // --- empty-group drop placeholder (v14): a real landing row in empty groups
 
@@ -2027,29 +1644,8 @@ const W14_ROW_NEW = `										children: expandedSessionGroups.includes(group.ke
  * archived: archive). The group-section-level highlight is removed in favor
  * of the row-level bar.
  */
-export async function applyEmptyDropRowPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`empty-drop-row target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(EMPTYDROP_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  const pairs = [
-    [W14_CLASS_OLD, W14_CLASS_NEW],
-    [W14_ROW_OLD, W14_ROW_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('empty-drop-row: a text block no longer matches; aborting without touching the bundle')
-    }
-  }
-  const backup = `${clientTarget}.pre-empty-drop-row.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  let next = original
-  for (const [oldText, newText] of pairs) next = next.replace(oldText, newText)
-  next = next.replace('group.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {',
-    `// dsh-toolbox empty-drop-row\n\t\t\t\t\t\t\t\t\tgroup.sessions.length === 0 && (0, react_jsx_runtime.jsx)("div", {`)
-  writeFileSync(clientTarget, next)
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyEmptyDropRowPatch) */
+
 
 // --- show placeholder only while dragging over the empty group (v15) --------
 
@@ -2065,24 +1661,8 @@ const W15_NEW = `									group.sessions.length === 0 && sessionDropMarker !== n
  * visible), so empty workspaces/groups stay clean and the landing point shows
  * exactly when it can receive a drop.
  */
-export async function applyHoverPlaceholderPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`hover-placeholder target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(HOVERPLACE_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (original.includes(W15_NEW)) {
-    // The code change is already in place — earlier applies never wrote the
-    // marker comment, so idempotence must be content-based.
-    return [{ file: clientTarget, alreadyPatched: true }]
-  }
-  if (!original.includes(W15_OLD)) {
-    throw new Error('hover-placeholder: the placeholder condition no longer matches; aborting without touching the bundle')
-  }
-  const backup = `${clientTarget}.pre-hover-placeholder.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(W15_OLD, `// dsh-toolbox hover-placeholder\n${W15_NEW}`))
-  return [{ file: clientTarget, backup, changed: true }]
-}
+/* (legacy entry point removed: applyHoverPlaceholderPatch) */
+
 
 // --- move-live-safe (v16): refuse live sessions + atomic rollback ------------
 
@@ -2195,28 +1775,8 @@ const M16_MUTATE_NEW = `				let newDirCreated = false;
  *    attach, and any failure restores the original file. Requires the
  *    workspace-bundle host patch (v10) + move-persistence-fix (v13).
  */
-export async function applyMoveLiveSafePatch(dshInstall) {
-  const apiTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js')
-  if (!existsSync(apiTarget)) throw new Error(`move-live-safe target not found: ${apiTarget}`)
-  const original = readFileSync(apiTarget, 'utf8')
-  if (original.includes(MOVELIVE_MARKER)) return [{ file: apiTarget, alreadyPatched: true }]
-  if (!original.includes(M16_LIVE_OLD) || !original.includes(M16_MUTATE_OLD)) {
-    throw new Error('move-live-safe: the moveSessionToWorkspace command no longer matches (workspace-bundle v10 host command + v13 fix must be applied first); aborting without touching the bundle')
-  }
-  const backup = `${apiTarget}.pre-move-live-safe.bak`
-  if (!existsSync(backup)) copyFileSync(apiTarget, backup)
-  let next = original
-  next = next.replace(M16_LIVE_OLD, M16_LIVE_NEW)
-  next = next.replace(M16_MUTATE_OLD, M16_MUTATE_NEW)
-  writeFileSync(apiTarget, next)
-  const { spawnSync } = await import('node:child_process')
-  const check = spawnSync(process.execPath, ['--check', apiTarget], { encoding: 'utf8' })
-  if (check.status !== 0) {
-    copyFileSync(backup, apiTarget)
-    throw new Error(`move-live-safe: syntax check failed after patching; rolled back.\n${check.stderr || check.stdout}`)
-  }
-  return [{ file: apiTarget, backup, changed: true, verified: check.stdout.trim() || 'syntax ok' }]
-}
+/* (legacy entry point removed: applyMoveLiveSafePatch) */
+
 
 // --- session id in hover card (v16) ----------------------------------------
 
@@ -2249,21 +1809,265 @@ const W16_NEW = `					(0, react_jsx_runtime.jsx)("div", {
  * card (the tooltip that appears on mouse-over of a session name), so users
  * can copy/look up the id without opening the conversation.
  */
-export async function applyHoverSessionIdPatch(dshInstall) {
-  const clientTarget = join(dshInstall, 'node_modules', '@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js')
-  if (!existsSync(clientTarget)) throw new Error(`hover-session-id target not found: ${clientTarget}`)
-  const original = readFileSync(clientTarget, 'utf8')
-  if (original.includes(HOVERID_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  if (original.includes(W16_NEW)) {
-    // The code change is already in place — earlier applies never wrote the
-    // marker comment, so idempotence must be content-based.
-    return [{ file: clientTarget, alreadyPatched: true }]
-  }
-  if (!original.includes(W16_OLD)) {
-    throw new Error('hover-session-id: the hover content block no longer matches; aborting without touching the bundle')
-  }
-  const backup = `${clientTarget}.pre-hover-session-id.bak`
-  if (!existsSync(backup)) copyFileSync(clientTarget, backup)
-  writeFileSync(clientTarget, original.replace(W16_OLD, `// dsh-toolbox hover-session-id\n${W16_NEW}`))
-  return [{ file: clientTarget, backup, changed: true }]
+/* (legacy entry point removed: applyHoverSessionIdPatch) */
+
+// ============================================================================
+// Feature-group architecture (v2)
+// ----------------------------------------------------------------------------
+// Two user-visible feature groups replace the old v1..v16 incremental patches:
+//
+//   session-area — everything about moving sessions around the left sidebar:
+//                  workspace <-> ungrouped <-> archived, in any direction
+//                  (drag & drop, buckets, host RPCs, error clarity).
+//   resilience   — a corrupt session log must not take the session surface
+//                  down (tolerant listing + behavioral verification).
+//
+// Applying is declarative, per patch (a patch = one feature change, possibly
+// several code blocks):
+//   * the patch marker is already present      -> skip whole patch (already
+//                                                  applied or official fix)
+//   * per block: `old` present                 -> replace with `new`
+//   * per block: neither old nor new           -> warn + skip THIS block only
+//                                                  (version drift; never abort)
+// A patch's marker is written only when at least one of its blocks was applied,
+// so a later patch that rewrites part of an earlier patch's code does not break
+// idempotence (the marker stays; the earlier patch is "done").
+//
+// Groups are orthogonal: each can be applied, verified, and unapplied
+// independently. Group-level backups: <file>.dtb-pre-<group>.bak.
+// ============================================================================
+
+const FILES = {
+  client: ['@deepseek-ai', 'dsh-client-ui-workspace', 'lib', 'client.js'],
+  host: ['@deepseek-ai', 'dsh-host-apiproxy', 'lib', 'index.js'],
+  workspace: ['@deepseek-ai', 'dsh-workspace', 'lib', 'index.js'],
+  persistence: ['@deepseek-ai', 'dsh-session-persistence-jsonl', 'lib', 'index.js'],
 }
+
+const filePath = (dshInstall, key) => join(dshInstall, 'node_modules', ...FILES[key])
+
+export const SESSION_AREA_HOST_BLOCKS = [
+  { note: "HOST", patchMarker: "dsh-toolbox workspace-live", markerAnchor: "", old: HOST_OLD, new: HOST_NEW },
+  { note: "DETACH_HOST_CMD", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_HOST_CMD_OLD, new: DETACH_HOST_CMD_NEW },
+  { note: "DETACH_HOST_SCHEMA", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_HOST_SCHEMA_OLD, new: DETACH_HOST_SCHEMA_NEW },
+  { note: "DETACH_HOST_REGISTRY", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_HOST_REGISTRY_OLD, new: DETACH_HOST_REGISTRY_NEW },
+  { note: "DETACH_HOST_VALUE_MAP", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_HOST_VALUE_MAP_OLD, new: DETACH_HOST_VALUE_MAP_NEW },
+  { note: "W10_CMD", patchMarker: "dsh-toolbox workspace-bundle", markerAnchor: "async unarchiveSession(request) {", old: W10_CMD_OLD, new: W10_CMD_NEW },
+  { note: "W10_SCHEMA", patchMarker: "dsh-toolbox workspace-bundle", markerAnchor: "", old: W10_SCHEMA_OLD, new: W10_SCHEMA_NEW },
+  { note: "W10_REGISTRY", patchMarker: "dsh-toolbox workspace-bundle", markerAnchor: "", old: W10_REGISTRY_OLD, new: W10_REGISTRY_NEW },
+  { note: "W10_VALUEMAP", patchMarker: "dsh-toolbox workspace-bundle", markerAnchor: "", old: W10_VALUEMAP_OLD, new: W10_VALUEMAP_NEW },
+  { note: "W13", patchMarker: "dsh-toolbox move-persistence-fix", markerAnchor: "", old: W13_OLD, new: W13_NEW },
+  { note: "M16_LIVE", patchMarker: "dsh-toolbox move-live-safe", markerAnchor: "", old: M16_LIVE_OLD, new: M16_LIVE_NEW },
+  { note: "M16_MUTATE", patchMarker: "dsh-toolbox move-live-safe", markerAnchor: "", old: M16_MUTATE_OLD, new: M16_MUTATE_NEW },
+]
+
+export const SESSION_AREA_CLIENT_BLOCKS = [
+  { note: "CLIENT_INSERT", patchMarker: "dsh-toolbox workspace-live", markerAnchor: "", old: CLIENT_INSERT_OLD, new: CLIENT_INSERT_NEW },
+  { note: "CLIENT_DROP", patchMarker: "dsh-toolbox workspace-live", markerAnchor: "", old: CLIENT_DROP_OLD, new: CLIENT_DROP_NEW },
+  { note: "V2_STATE", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_STATE_OLD, new: V2_STATE_NEW },
+  { note: "V2_COMMIT", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "const commitSessionToWorkspaceDrag = (activeDrag, workspaceId) => {", old: V2_COMMIT_OLD, new: V2_COMMIT_NEW },
+  { note: "V2_CLASS", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_CLASS_OLD, new: V2_CLASS_NEW },
+  { note: "V2_DRAGOVER", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_DRAGOVER_OLD, new: V2_DRAGOVER_NEW },
+  { note: "V2_DRAGSTART", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_DRAGSTART_OLD, new: V2_DRAGSTART_NEW },
+  { note: "V2_DRAGEND", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_DRAGEND_OLD, new: V2_DRAGEND_NEW },
+  { note: "V2_REFRESH", patchMarker: "dsh-toolbox workspace-live-v2", markerAnchor: "", old: V2_REFRESH_OLD, new: V2_REFRESH_NEW },
+  { note: "DETACH_CLIENT_STRAY", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_STRAY_OLD, new: DETACH_CLIENT_STRAY_NEW },
+  { note: "DETACH_CLIENT_MARKER", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_MARKER_OLD, new: DETACH_CLIENT_MARKER_NEW },
+  { note: "DETACH_CLIENT_DROP", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_DROP_OLD, new: DETACH_CLIENT_DROP_NEW },
+  { note: "DETACH_CLIENT_UNGROUPED_FN", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_UNGROUPED_FN_OLD, new: DETACH_CLIENT_UNGROUPED_FN_NEW },
+  { note: "DETACH_CLIENT_ST_PROPS", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_ST_PROPS_OLD, new: DETACH_CLIENT_ST_PROPS_NEW },
+  { note: "DETACH_CLIENT_WB_PROPS", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_WB_PROPS_OLD, new: DETACH_CLIENT_WB_PROPS_NEW },
+  { note: "DETACH_CLIENT_WB_RENDER", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_WB_RENDER_OLD, new: DETACH_CLIENT_WB_RENDER_NEW },
+  { note: "DETACH_CLIENT_INJECT", patchMarker: "dsh-toolbox ungrouped-detach", markerAnchor: "", old: DETACH_CLIENT_INJECT_OLD, new: DETACH_CLIENT_INJECT_NEW },
+  { note: "B4_HOVER", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_HOVER_OLD, new: B4_HOVER_NEW },
+  { note: "B4_MARKER", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_MARKER_OLD, new: B4_MARKER_NEW },
+  { note: "B4_DROP", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_DROP_OLD, new: B4_DROP_NEW },
+  { note: "B4_END", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_END_OLD, new: B4_END_NEW },
+  { note: "B4_ROWGATE", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_ROWGATE_OLD, new: B4_ROWGATE_NEW },
+  { note: "B4_UNGROUPED_FN", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "const commitSessionCrossGroupDrag = (activeDrag, over) => {", old: B4_UNGROUPED_FN_OLD, new: B4_UNGROUPED_FN_NEW },
+  { note: "B4_GROUPOVER", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_GROUPOVER_OLD, new: B4_GROUPOVER_NEW },
+  { note: "B4_CLASS", patchMarker: "dsh-toolbox blue-bar-drag", markerAnchor: "", old: B4_CLASS_OLD, new: B4_CLASS_NEW },
+  { note: "N5_CREATE", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "", old: N5_CREATE_OLD, new: N5_CREATE_NEW },
+  { note: "N5_ANCHOR", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "", old: N5_ANCHOR_OLD, new: N5_ANCHOR_NEW },
+  { note: "N5_ST_PROPS", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "", old: N5_ST_PROPS_OLD, new: N5_ST_PROPS_NEW },
+  { note: "N5_WB_PROPS", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "", old: N5_WB_PROPS_OLD, new: N5_WB_PROPS_NEW },
+  { note: "N5_RENDER", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "", old: N5_RENDER_OLD, new: N5_RENDER_NEW },
+  { note: "N5_INJECT", patchMarker: "dsh-toolbox ungrouped-new-session", markerAnchor: "createUngroupedSession: async () => {", old: N5_INJECT_OLD, new: N5_INJECT_NEW },
+  { note: "A6_REMOVE_BUTTON", patchMarker: "dsh-toolbox ungrouped-anchor", markerAnchor: "", old: A6_REMOVE_BUTTON_OLD, new: A6_REMOVE_BUTTON_NEW, skipNewCheck: true },
+  { note: "A6_CREATE", patchMarker: "dsh-toolbox ungrouped-anchor", markerAnchor: "", old: A6_CREATE_OLD, new: A6_CREATE_NEW },
+  { note: "A6_EFFECT", patchMarker: "dsh-toolbox ungrouped-anchor", markerAnchor: "", old: A6_EFFECT_OLD, new: A6_EFFECT_NEW },
+  { note: "B7_STRAY", patchMarker: "dsh-toolbox ungrouped-blank-visible", markerAnchor: "", old: B7_STRAY_OLD, new: B7_STRAY_NEW },
+  { note: "F8_DETACH", patchMarker: "dsh-toolbox detach-payload-fix", markerAnchor: "detachSession: async (workspaceId, sessionId) => {", old: F8_DETACH_OLD, new: F8_DETACH_NEW },
+  { note: "F8_CREATE", patchMarker: "dsh-toolbox detach-payload-fix", markerAnchor: "", old: F8_CREATE_OLD, new: F8_CREATE_NEW },
+  { note: "M9_HELPER", patchMarker: "dsh-toolbox move-error-clarity", markerAnchor: "const workspaceMoveFailureAlert = (reason, sessionId, workspaceId) => {", old: M9_HELPER_OLD, new: M9_HELPER_NEW },
+  { note: "M9_CATCH1", patchMarker: "dsh-toolbox move-error-clarity", markerAnchor: "", old: M9_CATCH1_OLD, new: M9_CATCH1_NEW },
+  { note: "M9_CATCH2", patchMarker: "dsh-toolbox move-error-clarity", markerAnchor: "", old: M9_CATCH2_OLD, new: M9_CATCH2_NEW },
+  { note: "W11_GROUP", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_GROUP_OLD, new: W11_GROUP_NEW },
+  { note: "W11_CREATE", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_CREATE_OLD, new: W11_CREATE_NEW },
+  { note: "W11_DROP", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_DROP_OLD, new: W11_DROP_NEW },
+  { note: "W11_ARCHIVE_FN", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "const commitSessionToArchiveDrag = (activeDrag) => {", old: W11_ARCHIVE_FN_OLD, new: W11_ARCHIVE_FN_NEW },
+  { note: "W11_WSDRAG", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_WSDRAG_OLD, new: W11_WSDRAG_NEW },
+  { note: "W11_UNGROUPED", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_UNGROUPED_OLD, new: W11_UNGROUPED_NEW },
+  { note: "W11_CROSS", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_CROSS_OLD, new: W11_CROSS_NEW },
+  { note: "W11_ST_PROPS", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_ST_PROPS_OLD, new: W11_ST_PROPS_NEW },
+  { note: "W11_WB_PROPS", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_WB_PROPS_OLD, new: W11_WB_PROPS_NEW },
+  { note: "W11_RENDER", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_RENDER_OLD, new: W11_RENDER_NEW },
+  { note: "W11_INJECT", patchMarker: "dsh-toolbox workspace-bundle-client", markerAnchor: "", old: W11_INJECT_OLD, new: W11_INJECT_NEW },
+  { note: "W12_LABEL", patchMarker: "dsh-toolbox archived-label", markerAnchor: "", old: W12_LABEL_OLD, new: W12_LABEL_NEW },
+  { note: "W14_CLASS", patchMarker: "dsh-toolbox empty-drop-row", markerAnchor: "", old: W14_CLASS_OLD, new: W14_CLASS_NEW },
+  { note: "W14_ROW", patchMarker: "dsh-toolbox empty-drop-row", markerAnchor: "group.sessions.length === 0 && (0, react_jsx_runtime.jsx)(\"div\", {", old: W14_ROW_OLD, new: W14_ROW_NEW },
+  { note: "W15", patchMarker: "dsh-toolbox hover-placeholder", markerAnchor: "group.sessions.length === 0 && sessionDropMarker !== null && sessionDropMarker.id === group.key && (0, react_jsx_runtime.jsx)(\"div\", {", old: W15_OLD, new: W15_NEW },
+  { note: "W16", patchMarker: "dsh-toolbox hover-session-id", markerAnchor: "(0, react_jsx_runtime.jsx)(\"div\", {", old: W16_OLD, new: W16_NEW },
+]
+
+export const SESSION_AREA_WORKSPACE_BLOCKS = [
+  { note: "W10_WORKSPACE", patchMarker: "dsh-toolbox workspace-bundle", markerAnchor: "", old: W10_WORKSPACE_OLD, new: W10_WORKSPACE_NEW },
+]
+
+export const RESILIENCE_BLOCKS = [
+  { note: 'resilience', patchMarker: 'dsh-toolbox resilience', markerAnchor: 'async list(signal) {', old: OLD_BLOCK, new: NEW_BLOCK },
+]
+
+export const FEATURE_GROUPS = {
+  'session-area': {
+    label: '会话区管理（session-area）',
+    files: {
+      client: SESSION_AREA_CLIENT_BLOCKS,
+      host: SESSION_AREA_HOST_BLOCKS,
+      workspace: SESSION_AREA_WORKSPACE_BLOCKS,
+    },
+  },
+  'resilience': {
+    label: '会话历史韧性（resilience）',
+    files: { persistence: RESILIENCE_BLOCKS },
+  },
+}
+
+
+/**
+ * Build the replacement text for a block. The patch marker comment is written
+ * ONLY by the block that owns markerAnchor (mirroring where the original
+ * patches wrote it); every other block is replaced verbatim. Insertion keeps
+ * the anchor line's leading whitespace so exact-match blocks that follow are
+ * not disturbed.
+ */
+const withMarker = (block, marker) => {
+  if (block.new.includes(marker)) return block.new
+  if (!block.markerAnchor || !block.new.includes(block.markerAnchor)) return block.new
+  const esc = block.markerAnchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const lineRe = new RegExp(`^([ \\t]*)(${esc})$`, 'm')
+  const m = block.new.match(lineRe)
+  if (m) {
+    return block.new.replace(lineRe, `$1// ${marker}\n$1$2`)
+  }
+  return block.new
+}
+
+/**
+ * Apply one feature group to an install. Blocks are processed per patch: the
+ * whole patch is skipped when its marker is present; otherwise each block is
+ * replaced when its `old` matches (a missing `old`/`new` warns and skips just
+ * that block). The patch marker is written when at least one block applied.
+ * Per file: a group-level backup (<file>.dtb-pre-<group>.bak) is taken once,
+ * before the first modification, so unapply restores the exact pre-group state.
+ */
+export async function applyGroup(dshInstall, groupName) {
+  const group = FEATURE_GROUPS[groupName]
+  if (!group) throw new Error(`unknown feature group: ${groupName} (expected one of: ${Object.keys(FEATURE_GROUPS).join(', ')})`)
+  const results = []
+  for (const [fileKey, fileBlocks] of Object.entries(group.files)) {
+    const target = filePath(dshInstall, fileKey)
+    if (!existsSync(target)) throw new Error(`${groupName}: target not found: ${target}`)
+    const original = readFileSync(target, 'utf8')
+    let text = original
+    const stats = { applied: 0, already: 0, skipped: 0, skippedNotes: [] }
+    // group blocks by patch, preserving order
+    const patches = new Map()
+    for (const block of fileBlocks) {
+      if (!patches.has(block.patchMarker)) patches.set(block.patchMarker, [])
+      patches.get(block.patchMarker).push(block)
+    }
+    for (const [marker, pblocks] of patches) {
+      if (text.includes(marker)) { stats.already++; continue }
+      let patchChanged = false
+      for (const block of pblocks) {
+        if (!block.skipNewCheck && text.includes(block.new)) { stats.already++; continue }
+        if (text.includes(block.old)) {
+          const replacement = withMarker(block, marker)
+          text = text.replace(block.old, replacement)
+          stats.applied++
+          patchChanged = true
+        } else {
+          stats.skipped++
+          stats.skippedNotes.push(block.note)
+        }
+      }
+      // if nothing of this patch applied AND marker absent, add marker so the
+      // patch counts as addressed (avoid re-warning forever)
+      if (!patchChanged && stats.applied === 0 && !text.includes(marker)) {
+        // nothing to do; leave as-is
+      }
+    }
+    if (stats.applied === 0) {
+      results.push({ file: target, group: groupName, ...stats, alreadyPatched: stats.already > 0 && stats.skipped === 0 })
+      if (stats.skipped > 0) {
+        console.warn(`  ⚠ ${groupName}/${fileKey}: ${stats.skipped} 块未匹配（官方版本可能已改动），已跳过: ${stats.skippedNotes.join(', ')}`)
+      }
+      continue
+    }
+    const backup = `${target}.dtb-pre-${groupName}.bak`
+    if (!existsSync(backup)) copyFileSync(target, backup)
+    writeFileSync(target, text)
+    results.push({ file: target, backup, group: groupName, ...stats, changed: true })
+  }
+  return results
+}
+
+/** Restore every file of a group from its group-level backup. */
+export async function unapplyGroup(dshInstall, groupName) {
+  const group = FEATURE_GROUPS[groupName]
+  if (!group) throw new Error(`unknown feature group: ${groupName}`)
+  const results = []
+  for (const fileKey of Object.keys(group.files)) {
+    const target = filePath(dshInstall, fileKey)
+    const backup = `${target}.dtb-pre-${groupName}.bak`
+    if (!existsSync(backup)) {
+      results.push({ file: target, missingBackup: true })
+      continue
+    }
+    copyFileSync(backup, target)
+    results.push({ file: target, restored: true, backup })
+  }
+  return results
+}
+
+/** Report per-group state without touching anything. */
+export function groupStatus(dshInstall) {
+  const out = []
+  const satisfiedBlocks = (fileBlocks, text) => fileBlocks.filter((b) => text.includes(b.patchMarker) || (!b.skipNewCheck && text.includes(b.new))).length
+  for (const [name, group] of Object.entries(FEATURE_GROUPS)) {
+    const perFile = []
+    let allPatched = true
+    let anyPatched = false
+    for (const [fileKey, fileBlocks] of Object.entries(group.files)) {
+      const target = filePath(dshInstall, fileKey)
+      if (!existsSync(target)) { perFile.push({ fileKey, missing: true }); allPatched = false; continue }
+      const text = readFileSync(target, 'utf8')
+      const markers = [...new Set(fileBlocks.map((b) => b.patchMarker))]
+      const appliedMarkers = markers.filter((m) => text.includes(m)).length
+      // a block is satisfied when its patch marker OR its new text is present
+      // (some patches are content-idempotent and never write a marker comment)
+      const satisfied = (b) => text.includes(b.patchMarker) || (!b.skipNewCheck && text.includes(b.new))
+      const driftBlocks = fileBlocks.filter((b) => !satisfied(b) && !text.includes(b.old))
+      const readyBlocks = fileBlocks.filter((b) => satisfied(b) || text.includes(b.old))
+      const filePatched = satisfiedBlocks(fileBlocks, text) === fileBlocks.length
+      perFile.push({ fileKey, markers: `${appliedMarkers}/${markers.length}`, ready: readyBlocks.length, drifted: driftBlocks.length, patched: filePatched })
+      if (filePatched) anyPatched = true
+      else allPatched = false
+    }
+    const backupExists = Object.keys(group.files).some((k) => existsSync(`${filePath(dshInstall, k)}.dtb-pre-${name}.bak`))
+    out.push({ name, label: group.label, perFile, patched: allPatched, any: anyPatched, backupExists })
+  }
+  return out
+}
+
