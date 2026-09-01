@@ -1196,14 +1196,14 @@ export async function applyDetachPayloadFix(dshInstall) {
   if (!existsSync(clientTarget)) throw new Error(`detach-payload-fix target not found: ${clientTarget}`)
   const original = readFileSync(clientTarget, 'utf8')
   if (original.includes(DETACHFIX_MARKER)) return [{ file: clientTarget, alreadyPatched: true }]
-  const pairs = [
-    [F8_DETACH_OLD, F8_DETACH_NEW],
-    [F8_CREATE_OLD, F8_CREATE_NEW],
-  ]
-  for (const [oldText] of pairs) {
-    if (!original.includes(oldText)) {
-      throw new Error('detach-payload-fix: a text block no longer matches; aborting without touching the bundle')
-    }
+  // Each block is matched and replaced independently: newer harness builds may
+  // already ship one of the bare-payload calls (e.g. session.create), so a
+  // missing block is skipped instead of aborting the whole patch.
+  const pairs = []
+  if (original.includes(F8_DETACH_OLD)) pairs.push([F8_DETACH_OLD, F8_DETACH_NEW])
+  if (original.includes(F8_CREATE_OLD)) pairs.push([F8_CREATE_OLD, F8_CREATE_NEW])
+  if (pairs.length === 0) {
+    throw new Error('detach-payload-fix: no rpc.call block matches; the bundled client already sends bare payloads (or the code shape changed)')
   }
   const backup = `${clientTarget}.pre-detach-payload-fix.bak`
   if (!existsSync(backup)) copyFileSync(clientTarget, backup)
