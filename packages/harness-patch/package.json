@@ -1,6 +1,6 @@
 {
   "name": "@dsh-toolbox/harness-patch",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Plugin: apply the local session-area management patch to an installed DeepSeek Harness — drag-organization across workspaces/ungrouped/archived, archived folder, cross-directory moves, and resilience to corrupt logs. One command applies everything; idempotent, backed up, verified.",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@dsh-toolbox/core": "^0.1.0"
+    "@dsh-toolbox/core": "^0.2.0"
   },
   "publishConfig": {
     "access": "public"

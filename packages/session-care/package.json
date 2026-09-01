@@ -1,6 +1,6 @@
 {
   "name": "@dsh-toolbox/session-care",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Plugin: session-log health check and repair for the DeepSeek Harness. Scans every stored session log under the reader's two contracts (frame layout + contiguous seqs), reports corruption precisely, and repairs recoverable logs (frame repackaging, duplicate-segment removal, safe truncation) with originals preserved.",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@dsh-toolbox/core": "^0.1.0"
+    "@dsh-toolbox/core": "^0.2.0"
   },
   "publishConfig": {
     "access": "public"

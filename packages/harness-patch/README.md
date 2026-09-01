@@ -5,8 +5,25 @@
 
 ```sh
 npm i -g @dsh-toolbox/harness-patch
-dtb-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重跑）
+dtb-harness-patch        # 交互式：状态一览 → 确认 → 逐补丁应用（幂等；升级 Harness 后重跑）
 ```
+
+默认运行进入**交互式界面**（全屏 TUI）：先显示各组状态一览（每个文件一行，带进度条与
+待应用 / 已具备 / 无法匹配 计数），确认后逐补丁应用并实时刷新进度；应用失败时提供
+"撤销 / 升级 Harness / 升级补丁模块"的选择。按 `H` 随时查看帮助。非 TTY（管道 / CI）
+自动降级为文本流程；`DSH_PATCH_TUI=0` 可强制文本模式。
+
+## 特性组
+
+按用户可见特性组织，两组互相独立、可分别应用与撤销：
+
+| 组 | 内容 |
+|---|---|
+| `session-area` | 左侧边栏任意移动会话（工作区 ↔ 未分组 ↔ 归档，全向） |
+| `resilience` | 坏日志不再拖垮会话列表（容错列举 + 行为验证） |
+
+逐块声明式：官方版本已包含的修改自动识别并跳过，只补真正缺失的块；不匹配的块单独跳过并警告，
+不会中止、不会破坏文件。
 
 ## 打补丁后界面获得的能力
 
@@ -24,11 +41,22 @@ dtb-harness-patch        # 应用全部补丁（幂等；升级 Harness 后重�
 - **刷新浏览器**：客户端能力立即生效（拖拽、归档文件夹、未分组锚点等）；
 - **重启一次 Harness**：host 侧 RPC 生效（attach/detach、unarchive、跨目录移动、韧性）。
 
+## 命令
+
+```sh
+dtb-harness-patch                  # 交互式全屏流程（默认）
+dtb-harness-patch --status         # 只读查看各组状态
+dtb-harness-patch --apply <组>     # 只应用一个组（session-area / resilience）
+dtb-harness-patch --unapply <组>   # 撤销一个组（从组级备份恢复）
+dtb-harness-patch --unapply-all    # 撤销全部组
+dtb-harness-patch --yes            # 跳过确认询问
+dtb-harness-patch --allow-unverified  # 跳过版本检测
+```
+
 ## 说明
 
-- 幂等：已打过的补丁自动跳过；修改前自动备份原文件；应用后自校验，失败自动回滚；
-- `npm i -g` 升级 Harness 后需重跑；
-- 高级：如需单独重打某项，用 `--workspace-live` / `--blue-bar` / `--workspace-bundle` 等参数（见 `dtb-harness-patch --help`）。
+- 幂等：已打过的补丁自动跳过；修改前备份为 `<文件>.dtb-pre-<组>.bak`，撤销 = 恢复该备份；
+- `npm i -g` 升级 Harness 后需重跑；版本不在已验证列表时会警告（`--allow-unverified` 跳过）。
 
 ---
 
@@ -41,8 +69,27 @@ and resilience to corrupt logs).
 
 ```sh
 npm i -g @dsh-toolbox/harness-patch
-dtb-harness-patch        # apply the full patch stack (idempotent; re-run after harness upgrades)
+dtb-harness-patch        # interactive: status → confirm → per-patch apply (idempotent)
 ```
+
+Running with no flags starts an **interactive full-screen flow**: a per-group status table (one
+line per file, with progress bars and pending/already/unmatched counts), a confirmation prompt,
+then live per-patch progress; on unmatched blocks it offers *unapply / upgrade Harness / upgrade
+this module*. Press `H` for help anytime. Non-TTY (pipe/CI) falls back to a plain-text flow;
+`DSH_PATCH_TUI=0` forces text mode.
+
+### Feature groups
+
+Two independent, user-visible groups (apply/unapply separately):
+
+| Group | What it does |
+|---|---|
+| `session-area` | move sessions anywhere in the left sidebar (workspace ↔ ungrouped ↔ archived, all directions) |
+| `resilience` | a corrupt log no longer takes the session surface down (tolerant listing + behavioral verification) |
+
+Applying is declarative per block: changes already present in the official build are detected and
+skipped; only genuinely missing blocks are patched. A block that matches neither old nor new is
+warned and skipped — never aborting, never corrupting.
 
 Capabilities after patching:
 
@@ -64,9 +111,21 @@ Effect:
 - **Restart the Harness once** — host-side RPCs (attach/detach, unarchive, cross-directory move,
   resilience) take effect.
 
-Notes: idempotent, auto-backed-up, self-verified with rollback on failure; re-run after `npm i -g`
-harness upgrades. Advanced: apply individual patches with `--workspace-live` / `--blue-bar` /
-`--workspace-bundle` etc. (see `dtb-harness-patch --help`).
+### Commands
+
+```sh
+dtb-harness-patch                  # interactive full-screen flow (default)
+dtb-harness-patch --status         # read-only per-group state
+dtb-harness-patch --apply <group>  # apply one group (session-area / resilience)
+dtb-harness-patch --unapply <group># restore one group from its backup
+dtb-harness-patch --unapply-all    # restore every group
+dtb-harness-patch --yes            # skip the confirmation prompt
+dtb-harness-patch --allow-unverified  # skip the version check
+```
+
+Notes: idempotent; files are backed up as `<file>.dtb-pre-<group>.bak` and unapply restores them;
+re-run after `npm i -g` harness upgrades. The tool warns when the installed version is not in the
+validated list (`--allow-unverified` to proceed anyway).
 
 ## License
 
